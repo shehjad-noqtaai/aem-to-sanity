@@ -14,8 +14,11 @@ dist/
 .env.*.local
 
 # Project-specific input (contains customer component paths + content roots)
+# Operator-authored lists stay untracked; the example's canonical lists are checked in.
 aem-component-paths
 aem-content-roots
+!examples/davids-bridal/aem-component-paths
+!examples/davids-bridal/aem-content-roots
 
 # Logs
 *.log
