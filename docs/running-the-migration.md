@@ -53,8 +53,10 @@ cp examples/davids-bridal/.env.example examples/davids-bridal/.env
 | `MIGRATION_DRY_RUN` | optional | `aem-assets` and `aem-import` are dry-run unless this is explicitly set to `false`. Default (unset): dry-run. |
 | `SANITY_PROJECT_ID` | required for writes | Only read when `MIGRATION_DRY_RUN=false`. |
 | `SANITY_DATASET` | required for writes | |
-| `SANITY_TOKEN` | required for writes | Write-scoped API token. |
-| `SANITY_API_VERSION` | optional | Default: `2024-01-01`. |
+| `SANITY_TOKEN` | required for writes | Write-scoped API token. Used for `aem-import` and for the Media Library **upload** phase of `aem-assets`. |
+| `SANITY_MEDIA_LIBRARY_ID` | required for `aem-assets` writes | Id of the org-level Sanity Media Library that assets go into (e.g. `mlTnBiUKRzfi`). Must belong to the same org as `SANITY_PROJECT_ID`. |
+| `SANITY_ML_LINK_TOKEN` | conditional | Personal auth token used for the Media Library **link** step in `aem-assets`. Required when `SANITY_TOKEN` is a project robot token (the link API rejects non-global sessions). See § 4c. |
+| `SANITY_API_VERSION` | optional | Default: `2024-01-01` for import; `aem-assets` pins `2025-02-19` because Media Library endpoints require it. |
 
 Auth precedence: `AEM_TOKEN` > (`*_USERNAME` + `*_PASSWORD`). If neither is set for the active `AEM_ENV`, the CLI fails fast with a clear message.
 
@@ -220,14 +222,46 @@ Walks each raw JCR tree, maps `sling:resourceType` values via `content-type-regi
 
 **Outputs:** `output/clean/*.json` (one per page, containing the transformed doc) and `output/transform-report.json` (unknown resource types, unknown props per component, transform bails — with first-N example paths per finding).
 
-### 4c. `aem-assets` — upload DAM → Sanity
+### 4c. `aem-assets` — upload DAM → Media Library → link to dataset
 
-Scans `output/clean/` for `/content/dam/...` references, downloads each asset from AEM using the pipeline's credentials, and uploads it to Sanity's asset pipeline. Rewrites the clean docs in place so fileupload fields contain Sanity asset refs (`{_type: "image", asset: {_ref: "image-..."}}`) instead of DAM path strings.
+> **Scope decision (@shehjadkhan 2026-04-22):** assets go to the Sanity **Media Library** (org-scoped), NOT the dataset's Content Lake. Each asset is uploaded once into the Media Library and then **linked** into the target dataset via the Global Document Reference (GDR) endpoint. The dataset holds a small linked asset document whose `_id` becomes the `asset._ref` inside content docs.
 
-Maintains `output/assets/manifest.json` — a per-DAM-path record of cache state, Sanity asset id, and upload status. Re-runs skip already-uploaded assets.
+Scans `output/clean/` for `/content/dam/...` references, downloads each asset from AEM, and runs four phases:
 
-- **Dry-run default.** Without `MIGRATION_DRY_RUN=false`, assets are catalogued but nothing is uploaded and clean docs are not rewritten.
-- **Requires** `SANITY_PROJECT_ID`, `SANITY_DATASET`, `SANITY_TOKEN` when not dry-running.
+1. **Download** from AEM DAM → `output/assets/<flattened-path>` (on-disk cache, resumable).
+2. **Upload** to Media Library — `POST https://api.sanity.io/v{apiVersion}/media-libraries/{mlId}/upload` returns `{asset: {_id}, assetInstance: {_id}}`. The parent `asset._id` is recorded as `mediaLibraryAssetId`; the versioned `assetInstance._id` as `linkedAssetInstanceId`.
+3. **Link** to dataset — `POST https://{projectId}.api.sanity.io/v{apiVersion}/assets/media-library-link/{dataset}` with body `{mediaLibraryId, assetInstanceId, assetId}`. Returns `{document: {_id, media: {_ref}, ...}}`. `document._id` is the dataset-local `_ref` that goes into content docs (Pattern A: `{_type:'image', asset:{_ref:'<linked-ref>'}}` — Studio-compatible).
+4. **Rewrite** clean docs in place so every `/content/dam/...` string becomes the linked asset ref object.
+
+Maintains `output/assets/manifest.json` — per-DAM-path record with `damPath → cachedFile → mediaLibraryAssetId → linkedAssetInstanceId → linkedRef`. Re-runs skip each phase that's already complete. Entry shape:
+
+```ts
+interface ManifestEntry {
+  damPath: string;
+  cachedFile?: string;             // local cache path
+  mimeType?: string;
+  fileSize?: number;
+  mediaLibraryAssetId?: string;    // asset._id in the ML (parent sanity.asset doc)
+  linkedAssetInstanceId?: string;  // assetInstance._id in the ML (versioned asset)
+  linkedRef?: string;              // dataset-local ref — goes into asset._ref in docs
+  mediaRef?: string;               // media-library:<mlId>:<assetId> — GDR reference
+  sanityRef?: { _type: "image"|"file"; asset: { _type: "reference"; _ref: string } };
+  status: "cached"|"downloaded"|"failed-download"|"uploaded"|"failed-upload"|"linked"|"failed-link"|"dry-run";
+  error?: string;
+  downloadedAt?: string; uploadedAt?: string; linkedAt?: string;
+}
+```
+
+- **Dry-run default.** Without `MIGRATION_DRY_RUN=false`, assets are downloaded to local cache only — no Media Library API calls, no link calls, no doc rewrites.
+- **Env vars:**
+  - `SANITY_PROJECT_ID`, `SANITY_DATASET` — as before.
+  - `SANITY_MEDIA_LIBRARY_ID` — **required** when not dry-running. Must be a Media Library in the same org as the project.
+  - `SANITY_TOKEN` — used for the upload phase (project robot token with write access works fine).
+  - `SANITY_ML_LINK_TOKEN` — **required for the link phase** when `SANITY_TOKEN` is a project robot token. The `/assets/media-library-link` endpoint requires a *personal* authorization token with read/write on both the Media Library (org-level) and the project/dataset; a project-only robot token is rejected with `401 Invalid non-global session`. Generate one via `sanity login` + `sanity debug --secrets` or the Sanity user management UI. Falls back to `SANITY_TOKEN` if unset (works only if that token is already a personal/OAuth token).
+  - `SANITY_API_VERSION` — defaults to `2025-02-19`, which is when Media Library support landed.
+- **Flags:** `--upload-only` skips the download phase, `--no-rewrite` skips the in-place clean-doc rewrite.
+
+Ordering contract: the link phase must complete before `aem-import` runs, because the clean docs only contain the linked `_ref` after phase 4. The `migrate:content` chain (`extract → transform → assets → import`) already enforces this.
 
 ### 4d. `aem-import` — `output/clean/` → Sanity
 
@@ -279,6 +313,9 @@ The studio's `schemas/index.ts` re-exports `allSchemaTypes` from `examples/david
 | `401` or `403` on fetches | Creds valid but account lacks read access to the JCR paths. Verify in AEM's CRXDE. |
 | `aem-import` prints `DRY RUN` and nothing lands in Sanity | That's the default. Export `MIGRATION_DRY_RUN=false` (also set `SANITY_PROJECT_ID`, `SANITY_DATASET`, `SANITY_TOKEN`) and re-run. |
 | `aem-import` → `Missing env var: SANITY_TOKEN` | You set `MIGRATION_DRY_RUN=false` but the write token isn't in the env. Source it into `examples/davids-bridal/.env`. |
+| `aem-assets` phase 3 → `401 Invalid non-global session for user id g-...` | The `/assets/media-library-link` endpoint rejected your `SANITY_TOKEN`. It requires a *personal* auth token, not a project robot token. Set `SANITY_ML_LINK_TOKEN` to a personal token with read/write on both the Media Library and the project. See § 4c. |
+| `aem-assets` phase 2 → `409 asset already exists` | Informational, not an error. The binary was already uploaded to the Media Library. The code recovers both IDs via a GROQ lookup and continues. |
+| `aem-assets` → `Missing env var: SANITY_MEDIA_LIBRARY_ID` | Set it to the org-level ML id that the project belongs to. `sanity media library list` on the org shows available ids. |
 | `aem-extract` fails with `HTTP 300` on a root | AEM returned an ambiguous-path response (the path may point at a folder). Check `output/extract-report.json` → `ambiguous[]` for the resolution suggestion. |
 | `aem-transform` → `No raw files in output/raw` | Run `aem-extract` first. The transform stage only reads from disk — it never hits AEM. |
 | Studio boots but shows no schemas | `output/schemas/index.ts` is missing or stale. Run `pnpm --filter example-davids-bridal migrate:schema`. |
