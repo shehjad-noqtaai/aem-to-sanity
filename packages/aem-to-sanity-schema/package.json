@@ -26,6 +26,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
     "clean": "rm -rf dist .turbo",
     "migrate:schema": "node dist/cli.js",
     "typegen": "node dist/typegen-cli.js",
