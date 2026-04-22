@@ -16,6 +16,8 @@ Each AEM Granite UI `sling:resourceType` is mapped to a Sanity field kind. Unkno
 | `granite/ui/components/coral/foundation/form/radiogroup` | `radio` | Radio group → Sanity string with options.list and layout:'radio' |
 | `granite/ui/components/coral/foundation/form/datepicker` | `date` | Date picker → Sanity date or datetime based on `type` |
 | `granite/ui/components/coral/foundation/form/pathfield` | `pathfield` | AEM pathfield → Sanity string (reference migration is future work) |
+| `granite/ui/components/coral/foundation/form/pathbrowser` | `pathbrowser` | Coral pathbrowser → Sanity image when rootPath is under /content/dam or field name matches /image/i, else string (same as pathfield) |
+| `granite/ui/components/foundation/form/pathbrowser` | `pathbrowser` | Legacy (non-Coral) pathbrowser alias → same routing as the Coral variant (image vs string based on rootPath + field name) |
 | `cq/gui/components/authoring/dialog/fileupload` | `file` | Image/video upload: read-only `{fileReferenceParameter}AemPath` (DAM path) + `{fileReference}` image/file asset; required only on asset when AEM required |
 | `granite/ui/components/coral/foundation/form/multifield` | `multifield` | Composite multifield → array; persisted key from inner `field.name` (strip ./); JCR rows `item0`/`item1`; titles from `fieldLabel` |
 | `granite/ui/components/coral/foundation/container` | `container` | Container → flattened; children hoist up |

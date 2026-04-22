@@ -24,6 +24,7 @@ export type SanityKind =
   | "container"
   | "hidden"
   | "pathfield"
+  | "pathbrowser"
   | "include";
 
 export interface MappingEntry {
@@ -73,6 +74,16 @@ export const MAPPING: Record<string, MappingEntry> = {
     kind: "pathfield",
     description:
       "AEM pathfield → Sanity string (reference migration is future work)",
+  },
+  "granite/ui/components/coral/foundation/form/pathbrowser": {
+    kind: "pathbrowser",
+    description:
+      "Coral pathbrowser → Sanity image when rootPath is under /content/dam or field name matches /image/i, else string (same as pathfield)",
+  },
+  "granite/ui/components/foundation/form/pathbrowser": {
+    kind: "pathbrowser",
+    description:
+      "Legacy (non-Coral) pathbrowser alias → same routing as the Coral variant (image vs string based on rootPath + field name)",
   },
   "cq/gui/components/authoring/dialog/fileupload": {
     kind: "file",

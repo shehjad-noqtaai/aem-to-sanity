@@ -455,6 +455,17 @@ async function buildField(
       } as SanityField;
     case "pathfield":
       return { ...common, type: "string" };
+    case "pathbrowser": {
+      // Route by rootPath + field name heuristic (see
+      // docs/unmapped-types-review.md § 1):
+      //   - rootPath starts with /content/dam OR field name matches /image/i
+      //     → Sanity `image`
+      //   - otherwise → `string` (same as existing `pathfield`)
+      if (isPathbrowserImage(node, name)) {
+        return { ...common, type: "image" };
+      }
+      return { ...common, type: "string" };
+    }
     case "multifield": {
       const itemTitle =
         stringAttr(node.fieldLabel) ??
@@ -637,4 +648,24 @@ function isImageUpload(node: DialogNode): boolean {
       : [];
   if (arr.length === 0) return false;
   return arr.every((m) => m.startsWith("image/"));
+}
+
+/**
+ * Decide whether a pathbrowser field should become a Sanity `image` or a
+ * `string`. Exported for unit tests.
+ *
+ * Rule (from docs/unmapped-types-review.md § 1):
+ *   - `rootPath` starts with `/content/dam` → image (DAM asset picker)
+ *   - field name matches `/image/i` → image (author picked a DAM asset but
+ *     stored the path elsewhere, e.g. `rootPath=/content`)
+ *   - otherwise → string (internal content path; future `reference`)
+ */
+export function isPathbrowserImage(
+  node: DialogNode,
+  resolvedFieldName: string,
+): boolean {
+  const rootPath = stringAttr(node["rootPath"]);
+  if (rootPath && rootPath.startsWith("/content/dam")) return true;
+  if (/image/i.test(resolvedFieldName)) return true;
+  return false;
 }
