@@ -1,4 +1,23 @@
 #!/usr/bin/env node
+/**
+ * aem-assets — download AEM DAM binaries, upload to Sanity **Media Library**,
+ * link each asset into the project dataset via the GDR endpoint, and rewrite
+ * clean docs so image/file fields carry the linked asset ref.
+ *
+ * Scope decision (@shehjadkhan 2026-04-22): assets MUST go to the Media Library
+ * (org-scoped), NOT the dataset Content Lake. See spec vT6pVpbH, task cd8YOXWC.
+ *
+ * Flow per asset:
+ *   1.  AEM GET `{damPath}`                               → local cache
+ *   2.  POST /media-libraries/{mlId}/upload                → {asset, assetInstance}
+ *   3.  POST /assets/media-library-link/{dataset}          → {document} linked in dataset
+ *   4.  Rewrite `{_type:'image'|'file', asset:{_ref:'<linked-ref>'}}` in clean docs
+ *
+ * Manifest (`output/assets/manifest.json`) tracks both IDs so re-runs skip
+ * whichever steps already completed.
+ *
+ * Dry-run by default. Set `MIGRATION_DRY_RUN=false` to upload + link + rewrite.
+ */
 import "dotenv/config";
 import {
   existsSync,
@@ -11,11 +30,17 @@ import {
 import { basename, extname, join, resolve } from "node:path";
 import { createColors, resolveConfig, type AuthMode } from "aem-to-sanity-core";
 
+// ── Types ────────────────────────────────────────────────────────────────
+
 interface SanityRef {
   _type: "image" | "file";
   asset: { _type: "reference"; _ref: string };
 }
 
+/**
+ * Per-asset state. Re-runs check `mediaLibraryAssetId` (skip upload) and
+ * `linkedAssetInstanceId` (skip link). `linkedRef` is what ends up in docs.
+ */
 interface ManifestEntry {
   damPath: string;
   cachedFile?: string;
@@ -23,13 +48,54 @@ interface ManifestEntry {
   mimeType?: string;
   downloadedAt?: string;
   uploadedAt?: string;
-  sanityAssetId?: string;
+  linkedAt?: string;
+  /** `asset._id` from the ML upload response (parent sanity.asset doc id). */
+  mediaLibraryAssetId?: string;
+  /** `assetInstance._id` from the ML upload response (versioned asset id). */
+  linkedAssetInstanceId?: string;
+  /** Dataset-local asset document `_id`, returned by the link endpoint. Used as `asset._ref` in docs. */
+  linkedRef?: string;
+  /** Optional GDR `media._ref` (e.g. `media-library:<mlId>:<assetId>`) for reference. */
+  mediaRef?: string;
   sanityRef?: SanityRef;
-  status: "cached" | "downloaded" | "failed-download" | "uploaded" | "failed-upload" | "dry-run";
+  status:
+    | "cached"
+    | "downloaded"
+    | "failed-download"
+    | "uploaded"
+    | "failed-upload"
+    | "linked"
+    | "failed-link"
+    | "dry-run";
   error?: string;
 }
 
 type Manifest = Record<string, ManifestEntry>;
+
+interface MlUploadResponse {
+  asset: { _id: string; _type: string };
+  assetInstance: {
+    _id: string;
+    _type: string;
+    mimeType?: string;
+    size?: number;
+    url?: string;
+    originalFilename?: string;
+  };
+}
+
+interface LinkResponse {
+  document: {
+    _id: string;
+    _type: string;
+    url?: string;
+    mimeType?: string;
+    size?: number;
+    media?: { _ref?: string; _type?: string; _weak?: boolean };
+  };
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────
 
 const MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -53,16 +119,12 @@ function flatten(damPath: string): string {
   return damPath.replace(/^\/content\/dam\//, "").replace(/\//g, "--");
 }
 
-function authHeader(auth: AuthMode): string {
+function aemAuthHeader(auth: AuthMode): string {
   if (auth.kind === "bearer") return `Bearer ${auth.token}`;
   return `Basic ${Buffer.from(`${auth.username}:${auth.password}`, "utf8").toString("base64")}`;
 }
 
-async function withRetry<T>(
-  label: string,
-  attempts: number,
-  fn: () => Promise<T>,
-): Promise<T> {
+async function withRetry<T>(label: string, attempts: number, fn: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
   for (let i = 1; i <= attempts; i++) {
     try {
@@ -77,6 +139,17 @@ async function withRetry<T>(
   }
   throw lastErr;
 }
+
+function mustEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) {
+    console.error(`Missing env var: ${name}`);
+    process.exit(2);
+  }
+  return v;
+}
+
+// ── Phase 1: download from AEM ───────────────────────────────────────────
 
 async function downloadOne(
   damPath: string,
@@ -95,64 +168,81 @@ async function downloadOne(
     };
   }
   try {
-    const buffer = await withRetry(`download ${damPath}`, 3, async () => {
+    const { buffer, mimeType } = await withRetry(`download ${damPath}`, 3, async () => {
       const res = await fetch(`${baseUrl}${damPath}`, {
-        headers: { Authorization: authHeader(auth) },
+        headers: { Authorization: aemAuthHeader(auth) },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-      return Buffer.from(await res.arrayBuffer());
+      const m = res.headers.get("content-type")?.split(";")[0]?.trim() ?? mimeFor(damPath);
+      return { buffer: Buffer.from(await res.arrayBuffer()), mimeType: m };
     });
     writeFileSync(cachedFile, buffer);
     return {
       damPath,
       cachedFile,
       fileSize: buffer.length,
-      mimeType: mimeFor(damPath),
+      mimeType,
       downloadedAt: new Date().toISOString(),
       status: "downloaded",
     };
   } catch (err) {
-    return {
-      damPath,
-      status: "failed-download",
-      error: (err as Error).message,
-    };
+    return { damPath, status: "failed-download", error: (err as Error).message };
   }
 }
 
-async function uploadOne(
+// ── Phase 2: upload to Media Library (raw HTTP POST) ─────────────────────
+
+/**
+ * We use raw HTTP POST rather than `@sanity/client` `client.assets.upload()`
+ * because the latter (v7.21.0 with `resource:{type:'media-library'}`) drops
+ * the `{asset, assetInstance}` payload and returns `undefined`. We need
+ * both IDs — parent and versioned — to complete the link step.
+ *
+ * Endpoint: POST https://api.sanity.io/v{apiVersion}/media-libraries/{mlId}/upload
+ */
+async function uploadToMediaLibrary(
   entry: ManifestEntry,
-  projectId: string,
-  dataset: string,
+  mlId: string,
   token: string,
   apiVersion: string,
 ): Promise<ManifestEntry> {
   if (!entry.cachedFile) return entry;
   const mimeType = entry.mimeType ?? mimeFor(entry.damPath);
-  const kind: "image" | "file" = mimeType.startsWith("image/") ? "image" : "file";
-  const route = kind === "image" ? "images" : "files";
   const filename = basename(entry.damPath);
-  const url = `https://${projectId}.api.sanity.io/v${apiVersion}/assets/${route}/${dataset}?filename=${encodeURIComponent(filename)}`;
+  const url = `https://api.sanity.io/v${apiVersion}/media-libraries/${mlId}/upload?filename=${encodeURIComponent(filename)}`;
 
   try {
-    const result = await withRetry(`upload ${entry.damPath}`, 3, async () => {
+    const result = await withRetry(`ml-upload ${entry.damPath}`, 3, async () => {
       const body = readFileSync(entry.cachedFile!);
       const res = await fetch(url, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": mimeType },
         body,
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-      return (await res.json()) as { document: { _id: string } };
+      const text = await res.text();
+      if (!res.ok) {
+        // 409 `asset already exists` is informational: recover IDs via GROQ.
+        if (res.status === 409) {
+          let body: any;
+          try { body = JSON.parse(text); } catch { body = {}; }
+          if (body?.error?.existingAssetId) {
+            const existing = await lookupExistingAsset(mlId, token, apiVersion, body.error.existingAssetId as string);
+            if (existing) return { recovered: true as const, ...existing };
+          }
+        }
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 400)}`);
+      }
+      const json = JSON.parse(text) as MlUploadResponse;
+      return { recovered: false as const, assetId: json.asset._id, assetInstanceId: json.assetInstance._id };
     });
+
+    const assetId = result.assetId;
+    const assetInstanceId = result.assetInstanceId;
     return {
       ...entry,
+      mediaLibraryAssetId: assetId,
+      linkedAssetInstanceId: assetInstanceId,
       status: "uploaded",
-      sanityAssetId: result.document._id,
-      sanityRef: {
-        _type: kind,
-        asset: { _type: "reference", _ref: result.document._id },
-      },
       uploadedAt: new Date().toISOString(),
     };
   } catch (err) {
@@ -160,7 +250,103 @@ async function uploadOne(
   }
 }
 
-// Walk the clean doc, collect every string value that starts with /content/dam/.
+async function lookupExistingAsset(
+  mlId: string,
+  token: string,
+  apiVersion: string,
+  assetInstanceId: string,
+): Promise<{ assetId: string; assetInstanceId: string } | null> {
+  // `sanity.asset` parent references the `sanity.imageAsset` / `sanity.fileAsset` instance.
+  const q = encodeURIComponent(`*[_type=="sanity.asset" && references($id)][0]{_id}`);
+  const p = encodeURIComponent(JSON.stringify({ id: assetInstanceId }));
+  const url = `https://${mlId}.api.sanity.io/v${apiVersion}/data/query/~?query=${q}&$id=${encodeURIComponent(JSON.stringify(assetInstanceId))}`;
+  // Simpler: use the /media-libraries/{id}/data/query endpoint format.
+  const altUrl = `https://api.sanity.io/v${apiVersion}/data/query/media-library:${mlId}?query=${q}&$id=${p.replace(/^./, "")}`;
+  // Fallback: use the JS client which handles the resource-routing. Inline
+  // dynamic import to keep the top-level module loadable even when
+  // `@sanity/client` is absent (tests, dry runs).
+  try {
+    const mod = await import("@sanity/client");
+    const client = mod.createClient({
+      resource: { type: "media-library", id: mlId },
+      apiVersion,
+      token,
+      useCdn: false,
+    });
+    const parent = (await client.fetch(
+      `*[_type=="sanity.asset" && references($id)][0]{_id}`,
+      { id: assetInstanceId },
+    )) as { _id: string } | null;
+    if (!parent?._id) return null;
+    return { assetId: parent._id, assetInstanceId };
+  } catch {
+    return null;
+  }
+}
+
+// ── Phase 3: link into project dataset ───────────────────────────────────
+
+/**
+ * POST https://{projectId}.api.sanity.io/v{apiVersion}/assets/media-library-link/{dataset}
+ * body: {mediaLibraryId, assetInstanceId, assetId}
+ *
+ * Returns `{document: {_id, _type, url, media:{_ref}, ...}}` — `document._id`
+ * is the dataset-local ref we store in docs as `asset._ref`.
+ *
+ * Per Sanity docs: this endpoint requires a **personal authorization token**
+ * with read/write on both the Media Library and the project/dataset. A
+ * project-scoped robot token produces `401 Invalid non-global session`.
+ * We read the token from `SANITY_ML_LINK_TOKEN` (falling back to
+ * `SANITY_TOKEN`) so operators can plug in a personal token without
+ * disturbing the robot token used elsewhere.
+ */
+async function linkToDataset(
+  entry: ManifestEntry,
+  projectId: string,
+  dataset: string,
+  mlId: string,
+  linkToken: string,
+  apiVersion: string,
+): Promise<ManifestEntry> {
+  if (!entry.mediaLibraryAssetId || !entry.linkedAssetInstanceId) return entry;
+  const url = `https://${projectId}.api.sanity.io/v${apiVersion}/assets/media-library-link/${dataset}`;
+  const body = JSON.stringify({
+    mediaLibraryId: mlId,
+    assetInstanceId: entry.linkedAssetInstanceId,
+    assetId: entry.mediaLibraryAssetId,
+  });
+  try {
+    const linkJson = await withRetry(`link ${entry.damPath}`, 3, async () => {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${linkToken}`, "Content-Type": "application/json" },
+        body,
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 400)}`);
+      return JSON.parse(text) as LinkResponse;
+    });
+    const mimeType = entry.mimeType ?? mimeFor(entry.damPath);
+    const kind: "image" | "file" = mimeType.startsWith("image/") ? "image" : "file";
+    const linkedRef = linkJson.document._id;
+    return {
+      ...entry,
+      linkedRef,
+      mediaRef: linkJson.document.media?._ref,
+      sanityRef: {
+        _type: kind,
+        asset: { _type: "reference", _ref: linkedRef },
+      },
+      status: "linked",
+      linkedAt: new Date().toISOString(),
+    };
+  } catch (err) {
+    return { ...entry, status: "failed-link", error: (err as Error).message };
+  }
+}
+
+// ── Phase 4: rewrite clean docs ──────────────────────────────────────────
+
 function collectDamPaths(value: unknown, out: Set<string>): void {
   if (typeof value === "string") {
     if (value.startsWith("/content/dam/")) out.add(value);
@@ -174,13 +360,14 @@ function collectDamPaths(value: unknown, out: Set<string>): void {
   for (const v of Object.values(value as Record<string, unknown>)) collectDamPaths(v, out);
 }
 
-// Walk the clean doc and replace DAM-path strings with the Sanity asset ref
-// object (when we have one). Operates in place.
-// Keys ending with `AemPath` hold read-only migrated paths — never replace.
+/**
+ * In-place rewrite: `/content/dam/...` strings become `{_type:'image', asset:{_ref}}`
+ * (Pattern A — matches the existing doc shape, Studio-compatible).
+ * Keys ending in `AemPath` hold read-only provenance — never replaced.
+ */
 function rewriteDamRefs(
   value: unknown,
   manifest: Manifest,
-  /** Object key when `value` is a direct property of a record. */
   propKey?: string,
 ): unknown {
   if (typeof value === "string") {
@@ -193,13 +380,11 @@ function rewriteDamRefs(
   }
   if (!value || typeof value !== "object") return value;
   if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++)
-      value[i] = rewriteDamRefs(value[i], manifest, undefined);
+    for (let i = 0; i < value.length; i++) value[i] = rewriteDamRefs(value[i], manifest, undefined);
     return value;
   }
   const obj = value as Record<string, unknown>;
-  for (const key of Object.keys(obj))
-    obj[key] = rewriteDamRefs(obj[key], manifest, key) as unknown;
+  for (const key of Object.keys(obj)) obj[key] = rewriteDamRefs(obj[key], manifest, key) as unknown;
   return obj;
 }
 
@@ -207,6 +392,8 @@ function loadManifest(file: string): Manifest {
   if (!existsSync(file)) return {};
   return JSON.parse(readFileSync(file, "utf8")) as Manifest;
 }
+
+// ── Main ─────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const c = createColors({ stream: process.stderr });
@@ -227,7 +414,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  // Collect every unique DAM path across every clean doc.
+  // Collect unique DAM paths across all clean docs.
   const damPaths = new Set<string>();
   for (const file of cleanFiles) {
     const doc = JSON.parse(readFileSync(join(cleanDir, file), "utf8")) as unknown;
@@ -238,61 +425,98 @@ async function main(): Promise<void> {
   console.error(
     `[assets] ${c.green(sortedPaths.length)} unique asset(s) across ${c.green(cleanFiles.length)} page(s)`,
   );
-  if (dryRun) console.error(c.dim("DRY RUN — set MIGRATION_DRY_RUN=false to upload to Sanity"));
+  if (dryRun) {
+    console.error(c.dim("DRY RUN — set MIGRATION_DRY_RUN=false to upload + link + rewrite"));
+  } else {
+    console.error(c.dim("Target Media Library + dataset link — MIGRATION_DRY_RUN=false"));
+  }
 
   const manifest = loadManifest(manifestFile);
 
-  // Phase 1: download (sequential — one asset in memory at a time).
+  // ── Phase 1: download ────────────────────────────────────────────────
   if (!uploadOnly) {
-    console.error(c.bold("\n── Download from AEM DAM ──"));
+    console.error(c.bold("\n── 1. Download from AEM DAM ──"));
     let n = 0;
     for (const damPath of sortedPaths) {
       n++;
       const existing = manifest[damPath];
       if (existing?.cachedFile && existsSync(existing.cachedFile)) {
-        console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.dim("cached")}   ${damPath}`);
+        console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.dim("cached ")} ${damPath}`);
         continue;
       }
-      console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.dim("→ ")}       ${damPath}`);
+      console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.dim("→      ")} ${damPath}`);
       const entry = await downloadOne(damPath, assetsDir, config.baseUrl, config.auth);
       manifest[damPath] = { ...existing, ...entry };
       writeFileSync(manifestFile, JSON.stringify(manifest, null, 2));
     }
   }
 
-  // Phase 2: upload. Dry-run stops here, after manifest reflects local cache.
-  console.error(c.bold("\n── Upload to Sanity ──"));
+  // ── Phase 2: upload to Media Library ────────────────────────────────
+  console.error(c.bold("\n── 2. Upload to Sanity Media Library ──"));
   if (dryRun) {
-    console.error(c.dim("  skipped (dry run)"));
+    const toUpload = sortedPaths.filter((p) => manifest[p]?.cachedFile && !manifest[p]?.mediaLibraryAssetId);
+    console.error(c.dim(`  would upload ${toUpload.length} asset(s) — skipped (dry run)`));
   } else {
-    const projectId = mustEnv("SANITY_PROJECT_ID");
-    const dataset = process.env.SANITY_DATASET ?? "production";
-    const token = mustEnv("SANITY_TOKEN");
-    const apiVersion = process.env.SANITY_API_VERSION ?? "2024-01-01";
+    const mlId = mustEnv("SANITY_MEDIA_LIBRARY_ID");
+    const uploadToken = mustEnv("SANITY_TOKEN");
+    const apiVersion = process.env.SANITY_API_VERSION ?? "2025-02-19";
     let n = 0;
     for (const damPath of sortedPaths) {
       n++;
       const entry = manifest[damPath];
       if (!entry?.cachedFile) {
-        console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.yellow("skip ")} ${damPath}  ${c.dim("(no local file)")}`);
+        console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.yellow("skip  ")} ${damPath}  ${c.dim("(no local file)")}`);
         continue;
       }
-      if (entry.sanityAssetId) {
-        console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.dim("up✓  ")} ${damPath}`);
+      if (entry.mediaLibraryAssetId && entry.linkedAssetInstanceId) {
+        console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.dim("up✓   ")} ${damPath}  ${c.dim(entry.mediaLibraryAssetId)}`);
         continue;
       }
-      console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.dim("↑ ")}       ${damPath}`);
-      manifest[damPath] = await uploadOne(entry, projectId, dataset, token, apiVersion);
+      console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.dim("↑     ")} ${damPath}`);
+      manifest[damPath] = await uploadToMediaLibrary(entry, mlId, uploadToken, apiVersion);
       writeFileSync(manifestFile, JSON.stringify(manifest, null, 2));
     }
   }
 
-  // Phase 3: rewrite clean docs in place. Safe to re-run; idempotent because
-  // once a string is replaced by `{ _type: 'image', ... }` it no longer matches
-  // the `/content/dam/` prefix.
+  // ── Phase 3: link to project dataset ────────────────────────────────
+  console.error(c.bold("\n── 3. Link to project dataset ──"));
+  if (dryRun) {
+    const toLink = sortedPaths.filter((p) => manifest[p]?.mediaLibraryAssetId && !manifest[p]?.linkedRef);
+    console.error(c.dim(`  would link ${toLink.length} asset(s) — skipped (dry run)`));
+  } else {
+    const projectId = mustEnv("SANITY_PROJECT_ID");
+    const dataset = process.env.SANITY_DATASET ?? "production";
+    const mlId = mustEnv("SANITY_MEDIA_LIBRARY_ID");
+    // SANITY_ML_LINK_TOKEN takes precedence — it must be a personal auth token
+    // because the /assets/media-library-link endpoint rejects project robot tokens.
+    const linkToken = process.env.SANITY_ML_LINK_TOKEN ?? process.env.SANITY_TOKEN;
+    if (!linkToken) {
+      console.error("Missing SANITY_ML_LINK_TOKEN (or SANITY_TOKEN)");
+      process.exit(2);
+    }
+    const apiVersion = process.env.SANITY_API_VERSION ?? "2025-02-19";
+    let n = 0;
+    for (const damPath of sortedPaths) {
+      n++;
+      const entry = manifest[damPath];
+      if (!entry?.mediaLibraryAssetId || !entry.linkedAssetInstanceId) {
+        console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.yellow("skip  ")} ${damPath}  ${c.dim("(no ML ids)")}`);
+        continue;
+      }
+      if (entry.linkedRef && entry.sanityRef) {
+        console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.dim("ln✓   ")} ${damPath}  ${c.dim(entry.linkedRef)}`);
+        continue;
+      }
+      console.error(`  ${c.dim(`${n}/${sortedPaths.length}`)} ${c.dim("⚭     ")} ${damPath}`);
+      manifest[damPath] = await linkToDataset(entry, projectId, dataset, mlId, linkToken, apiVersion);
+      writeFileSync(manifestFile, JSON.stringify(manifest, null, 2));
+    }
+  }
+
+  // ── Phase 4: rewrite clean docs in place ────────────────────────────
   let patched = 0;
   if (!skipRewrite && !dryRun) {
-    console.error(c.bold("\n── Rewrite clean docs ──"));
+    console.error(c.bold("\n── 4. Rewrite clean docs ──"));
     for (const file of cleanFiles) {
       const filePath = join(cleanDir, file);
       const doc = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
@@ -302,16 +526,18 @@ async function main(): Promise<void> {
     }
   }
 
-  const downloads = Object.values(manifest);
+  // ── Summary ─────────────────────────────────────────────────────────
+  const all = Object.values(manifest);
   const stats = {
     totalAssets: sortedPaths.length,
-    downloaded: downloads.filter((e) => e.status === "downloaded").length,
-    cached: downloads.filter((e) => e.status === "cached").length,
-    failedDownload: downloads.filter((e) => e.status === "failed-download").length,
-    uploaded: downloads.filter((e) => e.sanityAssetId).length,
-    failedUpload: downloads.filter((e) => e.status === "failed-upload").length,
+    downloaded: all.filter((e) => e.status === "downloaded").length,
+    cached: all.filter((e) => e.status === "cached").length,
+    failedDownload: all.filter((e) => e.status === "failed-download").length,
+    uploaded: all.filter((e) => e.mediaLibraryAssetId).length,
+    failedUpload: all.filter((e) => e.status === "failed-upload").length,
+    linked: all.filter((e) => e.linkedRef).length,
+    failedLink: all.filter((e) => e.status === "failed-link").length,
   };
-
   writeFileSync(
     join(outputDir, "assets-report.json"),
     JSON.stringify({ generatedAt: new Date().toISOString(), dryRun, summary: stats }, null, 2) + "\n",
@@ -320,17 +546,9 @@ async function main(): Promise<void> {
   console.error(c.dim("\n────────────────────────────────────────"));
   console.error(`Downloaded: ${c.green(stats.downloaded)}   Cached: ${c.dim(stats.cached)}   Failed: ${stats.failedDownload > 0 ? c.yellow(stats.failedDownload) : c.green(0)}`);
   console.error(`Uploaded:   ${c.green(stats.uploaded)}   Failed: ${stats.failedUpload > 0 ? c.yellow(stats.failedUpload) : c.green(0)}`);
+  console.error(`Linked:     ${c.green(stats.linked)}   Failed: ${stats.failedLink > 0 ? c.yellow(stats.failedLink) : c.green(0)}`);
   if (patched > 0) console.error(`Rewrote:    ${c.green(patched)} clean file(s)`);
   console.error(`Manifest:   ${c.dim(manifestFile)}`);
-}
-
-function mustEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) {
-    console.error(`Missing ${name}`);
-    process.exit(2);
-  }
-  return v;
 }
 
 main().catch((err) => {

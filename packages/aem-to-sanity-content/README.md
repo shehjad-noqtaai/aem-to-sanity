@@ -29,6 +29,14 @@ SANITY_DATASET=production
 SANITY_TOKEN=...
 MIGRATION_DRY_RUN=false                       # opt-in to commit. Default: dry-run.
 
+# aem-assets — Media Library
+# Assets go to the org-level Media Library, NOT the dataset Content Lake.
+SANITY_MEDIA_LIBRARY_ID=ml...                 # required when MIGRATION_DRY_RUN=false
+SANITY_ML_LINK_TOKEN=...                      # personal auth token for /assets/media-library-link
+                                              # (required when SANITY_TOKEN is a project robot token —
+                                              #  the link API rejects non-global sessions)
+# SANITY_API_VERSION=2025-02-19               # pinned for aem-assets; ML endpoints require it
+
 # Optional
 # AEM_MAX_RESPONSE_MB=100                     # abort any single response larger than this
 ```
@@ -62,5 +70,33 @@ MIGRATION_DRY_RUN=false pnpm aem-import                  # commit docs
 - `output/extract-report.json` — per-root outcome; HTTP 300/404/auth/too-large failures grouped by category.
 - `output/extract-404.log` — one `<jcrPath>\t<fullUrl>` per 404 (only written when 404s occur).
 - `output/transform-report.json` — unknown `sling:resourceType`s, unknown properties per mapped component, transform bails (max-depth or cycle).
-- `output/assets-report.json` — asset download/upload counts, failures.
-- `output/assets/manifest.json` — per-asset state (damPath → cachedFile, sanityRef). Drives resumability.
+- `output/assets-report.json` — asset download/upload/link counts, failures.
+- `output/assets/manifest.json` — per-asset state (damPath → cachedFile → mediaLibraryAssetId → linkedAssetInstanceId → linkedRef + sanityRef). Drives resumability for all four phases: download, upload to Media Library, GDR link to dataset, doc rewrite.
+
+## aem-assets — Media Library flow (@shehjadkhan 2026-04-22)
+
+`aem-assets` runs four phases. Dry-run default stops after phase 1 (local download).
+
+1. **Download** AEM DAM binary → local cache in `output/assets/`.
+2. **Upload to Media Library** — `POST https://api.sanity.io/v{apiVersion}/media-libraries/{mlId}/upload`. Response `{asset: {_id}, assetInstance: {_id}}` captures the parent asset id and the versioned instance id (both needed for step 3). Uses `SANITY_TOKEN` — a project robot token works for this step.
+3. **Link to dataset** — `POST https://{projectId}.api.sanity.io/v{apiVersion}/assets/media-library-link/{dataset}` with body `{mediaLibraryId, assetInstanceId, assetId}`. Response `{document: {_id, media: {_ref}, ...}}` — `document._id` is the dataset-local asset ref that goes into docs. **Requires a personal auth token** (`SANITY_ML_LINK_TOKEN`) because the endpoint rejects project robot tokens with `401 Invalid non-global session`.
+4. **Rewrite clean docs** in place — every `/content/dam/...` string becomes `{_type:'image'|'file', asset:{_ref:'<linked-ref>'}}`. Pattern A (Studio-compatible), matches existing doc shape.
+
+Manifest entry shape (`output/assets/manifest.json`):
+
+```ts
+{
+  damPath: "/content/dam/dbi/m1.png",
+  cachedFile: "/path/to/output/assets/dbi--m1.png",
+  mimeType: "image/png", fileSize: 4049,
+  mediaLibraryAssetId: "3CjO...",                // asset._id in ML
+  linkedAssetInstanceId: "image-<sha1>-WxH-png", // assetInstance._id in ML
+  linkedRef: "image-<sha1>-WxH-png",             // dataset-local ref — used as asset._ref
+  mediaRef: "media-library:mlTnBi...:3CjO...",    // GDR reference
+  sanityRef: {_type:"image", asset:{_type:"reference", _ref:"image-<sha1>-WxH-png"}},
+  status: "linked",
+  downloadedAt, uploadedAt, linkedAt
+}
+```
+
+Re-runs are idempotent: a populated `linkedRef` skips upload + link; a populated `cachedFile` skips download.
