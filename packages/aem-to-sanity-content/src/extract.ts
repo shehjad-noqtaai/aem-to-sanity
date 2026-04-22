@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   AemFetchError,
+  applyFixturesFromEnv,
   createColors,
   fetchInfinityTree,
   resolveConfig,
@@ -115,7 +116,7 @@ async function main(): Promise<void> {
       continue;
     }
     try {
-      const { tree, stats } = await fetchInfinityTree({ config }, entry.jcrPath, {
+      const { tree, stats } = await fetchInfinityTree(applyFixturesFromEnv({ config }), entry.jcrPath, {
         maxResponseBytes: maxBytes,
         onAmbiguous: (resolution) => ambiguous.push({ rootPath: entry.jcrPath, resolution }),
         maxDepthExpansions,

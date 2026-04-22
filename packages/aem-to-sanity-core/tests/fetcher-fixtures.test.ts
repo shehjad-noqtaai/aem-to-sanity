@@ -4,9 +4,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AemFetchError,
+  applyFixturesFromEnv,
   buildFixturesFetch,
   fetchInfinityJson,
   fixtureFilenameForUrl,
+  lookupFixture,
+  maybeApplyFixturesMode,
   type FetchDeps,
 } from "../src/aem/index.ts";
 import type { Config } from "../src/config/schema.ts";
@@ -148,5 +151,62 @@ describe("fetcher-fixtures", () => {
       caught = err as AemFetchError;
     }
     expect(caught?.kind).toBe("tooLarge");
+  });
+
+  it("lookupFixture throws when both a body file and a meta sidecar exist", () => {
+    writeFileSync(join(dir, "content__x.infinity.json"), "{}");
+    writeFileSync(
+      join(dir, "content__x.infinity.json.meta.json"),
+      JSON.stringify({ status: 500, body: "err" }),
+    );
+    expect(() => lookupFixture(dir, "/content/x.infinity.json")).toThrow(
+      /both a body file and a meta sidecar exist/,
+    );
+  });
+
+  it("maybeApplyFixturesMode only fires when deps.fixturesDir is set (env is ignored)", async () => {
+    // Prove the library does NOT read process.env: set the env var to a bogus
+    // path, don't set deps.fixturesDir, and confirm the provided fetch is
+    // preserved (no override, no crash on the missing dir).
+    const prev = process.env.AEM_FIXTURES_DIR;
+    process.env.AEM_FIXTURES_DIR = "/does-not-exist-and-should-not-be-read";
+    try {
+      const marker = {};
+      const fakeFetch = (async () =>
+        new Response(JSON.stringify(marker), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })) as typeof globalThis.fetch;
+      const out = maybeApplyFixturesMode({ config: cfg, fetch: fakeFetch });
+      expect(out.fetch).toBe(fakeFetch);
+      expect(out.fixturesDir).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.AEM_FIXTURES_DIR;
+      else process.env.AEM_FIXTURES_DIR = prev;
+    }
+  });
+
+  it("applyFixturesFromEnv copies AEM_FIXTURES_DIR into deps.fixturesDir", () => {
+    const prev = process.env.AEM_FIXTURES_DIR;
+    process.env.AEM_FIXTURES_DIR = "/tmp/some-fixture-dir";
+    try {
+      const out = applyFixturesFromEnv({ config: cfg });
+      expect(out.fixturesDir).toBe("/tmp/some-fixture-dir");
+    } finally {
+      if (prev === undefined) delete process.env.AEM_FIXTURES_DIR;
+      else process.env.AEM_FIXTURES_DIR = prev;
+    }
+  });
+
+  it("applyFixturesFromEnv preserves an explicit deps.fixturesDir over env", () => {
+    const prev = process.env.AEM_FIXTURES_DIR;
+    process.env.AEM_FIXTURES_DIR = "/env-wins";
+    try {
+      const out = applyFixturesFromEnv({ config: cfg, fixturesDir: "/explicit-wins" });
+      expect(out.fixturesDir).toBe("/explicit-wins");
+    } finally {
+      if (prev === undefined) delete process.env.AEM_FIXTURES_DIR;
+      else process.env.AEM_FIXTURES_DIR = prev;
+    }
   });
 });
