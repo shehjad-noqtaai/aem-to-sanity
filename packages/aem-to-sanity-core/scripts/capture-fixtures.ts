@@ -26,7 +26,7 @@
  *
  * Safety: only reads from AEM; no mutations. Every request is GET.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -46,17 +46,52 @@ const DIALOG_TARGETS = [
   "/apps/dbi/components/content/hero/_cq_dialog",
   "/apps/dbi/components/content/carousel/_cq_dialog",
 ];
-const CONTENT_TARGETS = [
-  // The root the audit used — 6 markers reproduced on this tree.
-  "/content/dbi",
-  // Locale root — typically has enough depth to surface markers.
-  "/content/dbi/en",
-  // Known deep pages.
-  "/content/dbi/en/homepage",
-  "/content/dbi/en/about-us",
-  "/content/dbi/en/stores",
-];
 const NOT_FOUND_TARGET = "/content/does-not-exist-abc123";
+
+/**
+ * Content targets come from a roots file (same format as the migrator
+ * consumes). Defaults to `examples/davids-bridal/aem-content-roots.fixtures`
+ * so the script stays aligned with whatever the operator wants captured,
+ * rather than hardcoding a tenant path. Override with `FIXTURE_ROOTS_FILE`.
+ *
+ * Parser mirrors `aem-to-sanity-content/src/extract.ts::parseRoots` (small
+ * duplication kept intentionally so this script has no cross-package runtime
+ * dependency on `aem-to-sanity-content`).
+ */
+function readContentTargets(repoRoot: string): string[] {
+  const file = resolve(
+    process.env.FIXTURE_ROOTS_FILE ??
+      join(repoRoot, "examples/davids-bridal/aem-content-roots.fixtures"),
+  );
+  const raw = readFileSync(file, "utf8");
+  const out: string[] = [];
+  let base: string | undefined;
+  for (const rawLine of raw.split(/\r?\n/)) {
+    const commentAt = rawLine.indexOf("#");
+    const line = (commentAt === -1 ? rawLine : rawLine.slice(0, commentAt)).trim();
+    if (!line) continue;
+    if (line.startsWith("@base")) {
+      const rest = line.slice(5).trim();
+      if (!rest.startsWith("/")) {
+        throw new Error(`@base must be an absolute path, got ${JSON.stringify(rest)}`);
+      }
+      base = rest.replace(/\/+$/, "");
+      continue;
+    }
+    if (line.startsWith("/")) {
+      out.push(line.replace(/\/+$/, ""));
+      continue;
+    }
+    if (!base) {
+      throw new Error(`Relative slug ${JSON.stringify(line)} needs an @base above it in ${file}.`);
+    }
+    out.push(`${base}/${line}`);
+  }
+  if (out.length === 0) {
+    throw new Error(`No content targets found in ${file}.`);
+  }
+  return out;
+}
 
 // Ambiguous case — real AEM returns 300 on the site root for us; the live
 // harness resolves it to `.4.json`, which we also want on disk so the
@@ -111,7 +146,9 @@ async function main(): Promise<void> {
   }
 
   // Phase 2: content roots + follow-up markers (marker chain).
-  for (const contentPath of CONTENT_TARGETS) {
+  const contentTargets = readContentTargets(repoRoot);
+  console.log(`[capture] content targets: ${contentTargets.length}`);
+  for (const contentPath of contentTargets) {
     await captureWithFollowups(
       config.baseUrl,
       contentPath,
