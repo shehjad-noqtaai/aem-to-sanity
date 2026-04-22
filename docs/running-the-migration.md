@@ -196,15 +196,17 @@ pnpm --filter example-davids-bridal import
 
 ### 4a. `aem-extract` — AEM `.infinity.json` → `output/raw/`
 
-Reads every entry in `aem-content-roots`, fetches `{root}.infinity.json` from AEM, and writes one JSON file per page to `output/raw/`. Transparently follows depth-5 truncation markers (AEM returns a string marker like `"...section_0": "...section_0"` at the depth boundary; the fetcher detects these plus suspiciously-empty nodes, issues follow-up fetches, and splices resolved subtrees back in).
+Reads every entry in `aem-content-roots`, fetches `{root}.infinity.json` from AEM, and writes one JSON file per page to `output/raw/`. Transparently follows depth-5 truncation markers (AEM returns a string marker like `"...section_0": "...section_0"` at the depth boundary; the fetcher detects these plus suspiciously-empty nodes, issues follow-up fetches in parallel, and splices resolved subtrees back in).
 
 | Flag / env | Effect |
 | --- | --- |
 | `--overwrite` | Re-fetch pages that already have a cached raw file. Default: skip. |
 | `AEM_CONTENT_ROOTS_FILE` | Path to roots file. Default: `./aem-content-roots`. |
 | `AEM_MAX_RESPONSE_MB` | Per-fetch payload cap. Oversized responses are recorded as `tooLarge` failures. |
+| `AEM_MAX_DEPTH_EXPANSIONS` | How many rounds of depth-5 follow-up fetches to run per root. Default: 3. Raise only if a page is pathologically deep; leftover markers after the budget are replaced with `{__truncated: "maxDepth", jcrPath}` sentinels and the transform stage treats them as opaque. |
+| `AEM_FIXTURES_DIR` | If set, reads captured AEM responses from this directory instead of issuing HTTP calls. See `examples/davids-bridal/fixtures/aem/README.md` for the URL → filename mapping. Used by unit tests and CI; leave unset for live migrations. |
 
-**Outputs:** `output/raw/*.json`, `output/extract-report.json` (counts + categorized failures), and `output/extract-404.log` if any roots weren't found.
+**Outputs:** `output/raw/*.json`, `output/extract-report.json` (counts, categorized failures, ambiguous-path resolutions, and a `depthExpansions` array with per-root `markersFound`/`markersResolved`/`markersTruncated`/`markersFailed`/`expansionsUsed` stats), and `output/extract-404.log` if any roots weren't found.
 
 ### 4b. `aem-transform` — `output/raw/` → `output/clean/`
 
@@ -236,7 +238,7 @@ Reads every file under `output/clean/` and commits the docs via `@sanity/client`
 
 ### Depth-5 truncation — handled for you
 
-AEM's `.infinity.json` truncates the tree at depth ~5, inserting path-string markers like `"/content/.../section_0": "/content/.../section_0"`. `aem-extract` detects these (and suspiciously-empty nodes at depth boundaries), issues follow-up fetches, and splices resolved subtrees back in. Nothing to configure unless a page is pathologically deep — in which case raise `maxDepthExpansions` on the programmatic API in `aem-to-sanity-core`.
+AEM's `.infinity.json` truncates the tree at depth ~5, inserting path-string markers like `"/content/.../section_0": "/content/.../section_0"`. `aem-extract` detects these (and suspiciously-empty nodes at depth boundaries), issues follow-up fetches in parallel (concurrency 4 by default), and splices resolved subtrees back into the parent tree at the correct key. A cycle guard prevents re-fetching the same path twice within a root. Nothing to configure unless a page is pathologically deep — raise `AEM_MAX_DEPTH_EXPANSIONS` (default 3) or the `maxDepthExpansions` option on the programmatic `fetchInfinityTree` API in `aem-to-sanity-core`. Markers still present after the budget are replaced with `{__truncated: "maxDepth", jcrPath}` sentinels which the transform stage treats as opaque (no broken string-marker leaves ever reach the Sanity docs).
 
 ---
 

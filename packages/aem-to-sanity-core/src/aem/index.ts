@@ -24,3 +24,8 @@ export {
 export type { FixtureLookup, FixtureMeta } from "./fetcher-fixtures.ts";
 export { detectTruncations, isTruncationMarker } from "./infinity.ts";
 export type { ContentNode, TruncationFailureMarker } from "./infinity.ts";
+export { fetchInfinityTree } from "./fetch-tree.ts";
+export type {
+  FetchInfinityTreeOptions,
+  FetchInfinityTreeResult,
+} from "./fetch-tree.ts";

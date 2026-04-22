@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import {
   AemFetchError,
   createColors,
-  fetchInfinityJson,
+  fetchInfinityTree,
   resolveConfig,
   type AmbiguousResolution,
 } from "aem-to-sanity-core";
@@ -95,8 +95,18 @@ async function main(): Promise<void> {
 
   const ambiguous: Array<{ rootPath: string; resolution: AmbiguousResolution }> = [];
   const failures: Array<{ rootPath: string; message: string; category: ReturnType<typeof categorize> }> = [];
+  const depthExpansions: Array<{
+    rootPath: string;
+    markersFound: number;
+    markersResolved: number;
+    markersTruncated: number;
+    markersFailed: number;
+    expansionsUsed: number;
+  }> = [];
   let downloaded = 0;
   let skipped = 0;
+
+  const maxDepthExpansions = numEnv("AEM_MAX_DEPTH_EXPANSIONS");
 
   for (const entry of entries) {
     const file = join(rawDir, encodeFilename(entry.jcrPath));
@@ -105,10 +115,26 @@ async function main(): Promise<void> {
       continue;
     }
     try {
-      const tree = await fetchInfinityJson({ config }, entry.jcrPath, undefined, {
+      const { tree, stats } = await fetchInfinityTree({ config }, entry.jcrPath, {
         maxResponseBytes: maxBytes,
         onAmbiguous: (resolution) => ambiguous.push({ rootPath: entry.jcrPath, resolution }),
+        maxDepthExpansions,
       });
+      if (
+        stats.markersFound > 0 ||
+        stats.markersResolved > 0 ||
+        stats.markersTruncated > 0 ||
+        stats.markersFailed > 0
+      ) {
+        depthExpansions.push({
+          rootPath: entry.jcrPath,
+          markersFound: stats.markersFound,
+          markersResolved: stats.markersResolved,
+          markersTruncated: stats.markersTruncated,
+          markersFailed: stats.markersFailed,
+          expansionsUsed: stats.expansionsUsed,
+        });
+      }
       writeFileSync(
         file,
         JSON.stringify({
@@ -126,6 +152,11 @@ async function main(): Promise<void> {
     }
   }
 
+  const totalMarkersFound = depthExpansions.reduce((a, d) => a + d.markersFound, 0);
+  const totalMarkersResolved = depthExpansions.reduce((a, d) => a + d.markersResolved, 0);
+  const totalMarkersTruncated = depthExpansions.reduce((a, d) => a + d.markersTruncated, 0);
+  const totalMarkersFailed = depthExpansions.reduce((a, d) => a + d.markersFailed, 0);
+
   const report = {
     generatedAt: new Date().toISOString(),
     baseUrl: config.baseUrl,
@@ -139,8 +170,13 @@ async function main(): Promise<void> {
       auth: failures.filter((f) => f.category === "auth").length,
       tooLarge: failures.filter((f) => f.category === "tooLarge").length,
       other: failures.filter((f) => f.category === "other").length,
+      markersFound: totalMarkersFound,
+      markersResolved: totalMarkersResolved,
+      markersTruncated: totalMarkersTruncated,
+      markersFailed: totalMarkersFailed,
     },
     ambiguous,
+    depthExpansions,
     failures,
   };
   const reportFile = join(outputDir, "extract-report.json");
@@ -157,6 +193,14 @@ async function main(): Promise<void> {
   console.error(c.dim("────────────────────────────────────────"));
   console.error(`Downloaded:  ${c.green(downloaded)}   Skipped: ${c.dim(skipped)}   Failed: ${failures.length > 0 ? c.yellow(failures.length) : c.green(0)}`);
   if (ambiguous.length > 0) console.error(`Ambiguous:   ${c.yellow(ambiguous.length)} ${c.dim("(HTTP 300 — see extract-report.json)")}`);
+  if (totalMarkersFound > 0) {
+    const resolvedColor = totalMarkersTruncated === 0 && totalMarkersFailed === 0 ? c.green : c.yellow;
+    console.error(
+      `Depth splice: ${resolvedColor(totalMarkersResolved)}/${totalMarkersFound} markers resolved` +
+        (totalMarkersTruncated > 0 ? `, ${c.yellow(totalMarkersTruncated)} truncated (maxDepth)` : "") +
+        (totalMarkersFailed > 0 ? `, ${c.yellow(totalMarkersFailed)} failed` : ""),
+    );
+  }
   console.error(`Report:      ${c.dim(reportFile)}`);
   if (notFound.length > 0) console.error(`404 log:     ${c.dim(notFoundLog)} ${c.dim(`(${notFound.length} entries)`)}`);
 
