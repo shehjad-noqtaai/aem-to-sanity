@@ -15,3 +15,12 @@ export type {
   FetchDeps,
   FetchInfinityOptions,
 } from "./fetcher.ts";
+export {
+  buildFixturesFetch,
+  fixtureFilenameForUrl,
+  lookupFixture,
+  maybeApplyFixturesMode,
+} from "./fetcher-fixtures.ts";
+export type { FixtureLookup, FixtureMeta } from "./fetcher-fixtures.ts";
+export { detectTruncations, isTruncationMarker } from "./infinity.ts";
+export type { ContentNode, TruncationFailureMarker } from "./infinity.ts";

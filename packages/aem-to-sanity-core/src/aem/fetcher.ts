@@ -1,6 +1,7 @@
 import type { AuthMode, Config } from "../config/schema.ts";
 import type { Logger } from "../logger.ts";
 import { DialogNodeSchema, type DialogNode } from "./dialog-types.ts";
+import { maybeApplyFixturesMode } from "./fetcher-fixtures.ts";
 
 export type AemFetchErrorKind =
   | "network"
@@ -86,8 +87,9 @@ export async function fetchInfinityJson<T = unknown>(
   parse?: (raw: unknown) => T,
   opts?: FetchInfinityOptions,
 ): Promise<T> {
-  const { config, logger } = deps;
-  const fetchImpl = deps.fetch ?? globalThis.fetch;
+  const effectiveDeps = maybeApplyFixturesMode(deps);
+  const { config, logger } = effectiveDeps;
+  const fetchImpl = effectiveDeps.fetch ?? globalThis.fetch;
   const originalUrl = `${config.baseUrl}${jcrPath}.infinity.json`;
 
   logger?.debug(`GET ${originalUrl}`);
