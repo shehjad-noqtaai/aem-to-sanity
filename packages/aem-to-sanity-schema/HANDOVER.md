@@ -43,8 +43,31 @@ Option A — **drop in as two local packages** (fastest):
 
 1. Copy both directories into the target repo, e.g. `vendor/aem-to-sanity-core` and `vendor/aem-to-sanity-schema`.
 2. In `vendor/aem-to-sanity-schema/package.json`, change `"aem-to-sanity-core": "workspace:*"` to `"aem-to-sanity-core": "file:../aem-to-sanity-core"` (or a relative path from wherever you drop them).
-3. `npm install` / `pnpm install` from the target repo, then `pnpm --filter aem-to-sanity-core build && pnpm --filter aem-to-sanity-schema build`.
-4. Call the CLIs via `node vendor/aem-to-sanity-schema/dist/cli.js` (or add them to your project `package.json` scripts).
+3. Create a `pnpm-workspace.yaml` at your project root that includes the vendor packages:
+   ```yaml
+   packages:
+     - "vendor/*"
+   ```
+4. Add `aem-to-sanity-schema` as a `devDependency` in your root `package.json` so pnpm links the CLI bins:
+   ```json
+   {
+     "devDependencies": {
+       "aem-to-sanity-schema": "workspace:*"
+     }
+   }
+   ```
+5. Copy `tsconfig.base.json` from the monorepo root into your project root. Both packages extend `../../tsconfig.base.json` (relative to `vendor/*/`). Without this file the TypeScript declaration build fails with `TS5083: Cannot read file '…/tsconfig.base.json'`.
+6. Add `@types/node` to your project's devDependencies (it lives in the monorepo root, not in the individual packages):
+   ```json
+   {
+     "devDependencies": {
+       "@types/node": "^20.0.0",
+       "aem-to-sanity-schema": "workspace:*"
+     }
+   }
+   ```
+7. `pnpm install` from the target repo, then `pnpm --filter aem-to-sanity-core build && pnpm --filter aem-to-sanity-schema build`.
+8. Call the CLIs via `pnpm exec aem-to-sanity-schema` (bin is linked via the workspace dep) or directly via `node vendor/aem-to-sanity-schema/dist/cli.js`.
 
 Option B — **inline core into schema** (one package, zero internal deps):
 
@@ -68,6 +91,7 @@ Peer (used by the output, not by the generator itself):
 
 Dev:
 - `tsup` (build), `typescript`, `tsx` (only if running from source)
+- `@types/node` — **required at the project root** (not bundled in the individual packages)
 
 ## Runtime inputs
 
@@ -230,16 +254,63 @@ Skip unless you actually want the content side:
 
 ## Smoke test in the new project
 
+The full smoke test is automated in `scripts/handover-smoke.sh`. To run it manually:
+
 ```sh
-# in the target project, after copying both packages and installing
-echo "/apps/wknd/components/content/byline" > aem-component-paths
+# 1. Create project structure
+mkdir -p my-project/vendor
+cd my-project
+
+# 2. Copy packages
+cp -r /path/to/aem-to-sanity/packages/aem-to-sanity-core vendor/
+cp -r /path/to/aem-to-sanity/packages/aem-to-sanity-schema vendor/
+
+# 3. Patch workspace dep
+sed -i 's|"aem-to-sanity-core": "workspace:*"|"aem-to-sanity-core": "file:../aem-to-sanity-core"|' \
+  vendor/aem-to-sanity-schema/package.json
+
+# 4. Create workspace scaffolding
+cat > pnpm-workspace.yaml <<'EOF'
+packages:
+  - "vendor/*"
+EOF
+
+cat > package.json <<'EOF'
+{
+  "name": "my-project",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "aem-to-sanity-schema": "workspace:*"
+  }
+}
+EOF
+
+# 5. Copy tsconfig.base.json from the monorepo root
+cp /path/to/aem-to-sanity/tsconfig.base.json ./
+
+# 6. Install + build
+pnpm install
+pnpm --filter aem-to-sanity-core build
+pnpm --filter aem-to-sanity-schema build
+
+# 7. Create .env and component paths
 cat > .env <<EOF
-AEM_AUTHOR_URL=https://localhost:4502
+AEM_AUTHOR_URL=https://author.example.com
 AEM_AUTHOR_USERNAME=admin
 AEM_AUTHOR_PASSWORD=admin
 EOF
+
+echo "/apps/wknd/components/content/byline" > aem-component-paths
+
+# 8. Run
 pnpm exec aem-to-sanity-schema
 ls output/schemas/           # should contain byline.ts + index.ts
 ```
 
-If byline.ts appears and `migration-report.json` says `successes: 1`, the extraction worked.
+If `byline.ts` appears and `migration-report.json` says `successes: 1`, the extraction worked.
+
+> **Automated smoke test:** `bash scripts/handover-smoke.sh` runs all of the above end-to-end.
+> Add `SMOKE_PHASE2=1` to also validate the Studio boots and `sanity schema validate` passes.
