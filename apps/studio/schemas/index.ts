@@ -1,12 +1,11 @@
 /**
- * Re-exports from the `davids-bridal` example's generated schemas barrel.
+ * Re-exports from the generated schemas barrel that lives alongside this
+ * Studio (`./generated/`). The `aem-to-sanity-schema` CLI writes there when
+ * the example package sets `SCHEMAS_OUT_DIR` to
+ * `../../apps/studio/schemas/generated`.
  *
  * Studio consumers should import `allSchemaTypes` from here (or inline their
  * own mapping when they want to filter / rename before handing it to
  * `defineConfig({ schema: { types } })`).
- *
- * This shim exists so the Studio's imports stay stable regardless of where
- * the schemas were emitted — change the example path in one place and every
- * downstream reference follows.
  */
-export { allSchemaTypes } from "../../../examples/davids-bridal/output/schemas/index.ts";
+export { allSchemaTypes } from "./generated/index.ts";

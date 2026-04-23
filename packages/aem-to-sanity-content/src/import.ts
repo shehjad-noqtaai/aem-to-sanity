@@ -27,7 +27,7 @@ function requireEnv(name: string): string {
 async function main(): Promise<void> {
   const c = createColors({ stream: process.stderr });
   const outputDir = resolve(process.env.OUTPUT_DIR ?? "./output");
-  const cleanDir = join(outputDir, "clean");
+  const cleanDir = join(outputDir, "cache", "clean");
   const dryRun = process.env.MIGRATION_DRY_RUN !== "false";
 
   const files = readdirSync(cleanDir).filter((f) => f.endsWith(".json")).sort();

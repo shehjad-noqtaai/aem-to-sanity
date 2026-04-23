@@ -473,8 +473,8 @@ function main(): void {
   const allowed = include ? new Set(include) : undefined;
 
   const registry = loadRegistry(registryFile);
-  const rawDir = join(outputDir, "raw");
-  const cleanDir = join(outputDir, "clean");
+  const rawDir = join(outputDir, "cache", "raw");
+  const cleanDir = join(outputDir, "cache", "clean");
   mkdirSync(cleanDir, { recursive: true });
 
   const rawFiles = readdirSync(rawDir).filter((f) => f.endsWith(".json")).sort();
@@ -540,7 +540,7 @@ function main(): void {
   }
 
   const report = audit.report() as { summary: { totalFindings: number } };
-  const reportFile = join(outputDir, "transform-report.json");
+  const reportFile = join(outputDir, "cache", "transform-report.json");
   writeFileSync(reportFile, JSON.stringify(report, null, 2) + "\n", "utf8");
 
   console.error(c.dim("────────────────────────────────────────"));

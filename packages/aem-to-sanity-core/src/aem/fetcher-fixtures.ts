@@ -100,6 +100,18 @@ export function lookupFixture(
 
   if (!hasBody && !hasMeta) return undefined;
 
+  // Invariant: a fixture captures EITHER a successful 200 body OR a non-200
+  // meta sidecar — never both. Having both means the capture is ambiguous
+  // (the next round of `buildFixturesFetch` would silently prefer the meta
+  // and drop the body, which is the exact silent-data-loss pattern we're
+  // trying to avoid). Fail loudly instead.
+  if (hasBody && hasMeta) {
+    throw new Error(
+      `Fixture ${filename}: both a body file and a meta sidecar exist under ${fixturesDir}. ` +
+        `Remove one — a body file implies a 200 response; a meta sidecar implies a non-200.`,
+    );
+  }
+
   let meta: FixtureMeta | undefined;
   if (hasMeta) {
     try {
@@ -203,29 +215,45 @@ function statusText(status: number): string {
 }
 
 /**
- * Helper: if `AEM_FIXTURES_DIR` is set and points at a readable directory,
- * returns an augmented `FetchDeps` with a fixtures-backed `fetch`. Otherwise
- * returns `deps` unchanged. Safe no-op when fixtures aren't configured.
+ * If `deps.fixturesDir` is set and points at a readable directory, returns an
+ * augmented `FetchDeps` with a fixtures-backed `fetch`. Otherwise returns
+ * `deps` unchanged. Pure function of inputs — does NOT read process env, so
+ * library callers see deterministic behaviour (an explicit `deps.fetch` is
+ * only overridden when `deps.fixturesDir` is set too). To pick up
+ * `AEM_FIXTURES_DIR` from the environment at CLI entry points, call
+ * `applyFixturesFromEnv(deps)` first.
  */
 export function maybeApplyFixturesMode(deps: FetchDeps): FetchDeps {
-  const dir = process.env.AEM_FIXTURES_DIR;
+  const dir = deps.fixturesDir;
   if (!dir) return deps;
   let stat;
   try {
     stat = statSync(dir);
   } catch (err) {
     throw new Error(
-      `AEM_FIXTURES_DIR=${dir} does not exist or is not readable: ${(err as Error).message}`,
+      `fixturesDir=${dir} does not exist or is not readable: ${(err as Error).message}`,
     );
   }
   if (!stat.isDirectory()) {
-    throw new Error(`AEM_FIXTURES_DIR=${dir} is not a directory`);
+    throw new Error(`fixturesDir=${dir} is not a directory`);
   }
   deps.logger?.debug(`fixtures mode: reading AEM responses from ${dir}`);
   return {
     ...deps,
     fetch: buildFixturesFetch(dir, deps.config.baseUrl),
   };
+}
+
+/**
+ * CLI-only helper: copies `AEM_FIXTURES_DIR` from `process.env` into
+ * `deps.fixturesDir` (if not already set). Keeps env-var reading out of
+ * library code — only CLI entry points should touch `process.env`.
+ */
+export function applyFixturesFromEnv(deps: FetchDeps): FetchDeps {
+  if (deps.fixturesDir) return deps;
+  const dir = process.env.AEM_FIXTURES_DIR;
+  if (!dir) return deps;
+  return { ...deps, fixturesDir: dir };
 }
 
 // Avoid unused warnings on the re-export list — these types are part of the

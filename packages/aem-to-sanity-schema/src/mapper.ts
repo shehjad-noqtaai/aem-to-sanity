@@ -454,13 +454,12 @@ async function buildField(
         type: isImageUpload(node) ? "image" : "file",
       } as SanityField;
     case "pathfield":
-      return { ...common, type: "string" };
     case "pathbrowser": {
       // Route by rootPath + field name heuristic (see
       // docs/unmapped-types-review.md § 1):
-      //   - rootPath starts with /content/dam OR field name matches /image/i
-      //     → Sanity `image`
-      //   - otherwise → `string` (same as existing `pathfield`)
+      //   - rootPath starts with /content/dam → image (DAM asset picker)
+      //   - last word of the field name is `image`/`img` → image
+      //   - otherwise → `string` (internal content path; future `reference`)
       if (isPathbrowserImage(node, name)) {
         return { ...common, type: "image" };
       }
@@ -651,14 +650,20 @@ function isImageUpload(node: DialogNode): boolean {
 }
 
 /**
- * Decide whether a pathbrowser field should become a Sanity `image` or a
+ * Decide whether a pathfield/pathbrowser should become a Sanity `image` or a
  * `string`. Exported for unit tests.
  *
- * Rule (from docs/unmapped-types-review.md § 1):
+ * Rule:
  *   - `rootPath` starts with `/content/dam` → image (DAM asset picker)
- *   - field name matches `/image/i` → image (author picked a DAM asset but
- *     stored the path elsewhere, e.g. `rootPath=/content`)
+ *   - last camelCase/snake/kebab word of the field name is `image`/`img` → image
  *   - otherwise → string (internal content path; future `reference`)
+ *
+ * Why "last word only": the earlier `/image/i` substring rule mis-routed
+ * string fields like `preImageLink`, `bgImagePath`, and `imageCaptionText`
+ * to Sanity `image`, silently losing the link/path/text value at transform
+ * time. The last-word rule keeps the common case (`heroImage`, `desktopImage`,
+ * plain `image`) while ruling out compound names where the image token is
+ * a qualifier.
  */
 export function isPathbrowserImage(
   node: DialogNode,
@@ -666,6 +671,20 @@ export function isPathbrowserImage(
 ): boolean {
   const rootPath = stringAttr(node["rootPath"]);
   if (rootPath && rootPath.startsWith("/content/dam")) return true;
-  if (/image/i.test(resolvedFieldName)) return true;
-  return false;
+  return isImageyFieldName(resolvedFieldName);
+}
+
+function isImageyFieldName(name: string): boolean {
+  // Split camelCase (`heroImage` → `hero Image`), snake_case, and kebab-case
+  // into lowercase tokens. The `([a-z])([A-Z])` boundary preserves ALL-CAPS
+  // runs like `MobileIMAGE` as a single trailing token rather than per-char.
+  const tokens = name
+    .replace(/[_-]/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (tokens.length === 0) return false;
+  const last = tokens[tokens.length - 1];
+  return last === "image" || last === "img";
 }

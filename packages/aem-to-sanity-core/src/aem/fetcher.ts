@@ -24,6 +24,16 @@ export interface FetchDeps {
   config: Config;
   fetch?: typeof globalThis.fetch;
   logger?: Logger;
+  /**
+   * When set, `fetchInfinityJson` reads AEM responses from this directory
+   * instead of calling `fetch`. Points at a fixture set produced by
+   * `scripts/capture-fixtures.ts`. Setting this field is the library-facing
+   * way to enable fixtures mode; CLIs can pick up the `AEM_FIXTURES_DIR`
+   * env var into this field with `applyFixturesFromEnv(deps)` before
+   * passing `deps` into core. Library code never reads process env directly,
+   * so callers can mix real and fixture-backed fetches in the same process.
+   */
+  fixturesDir?: string;
 }
 
 /**

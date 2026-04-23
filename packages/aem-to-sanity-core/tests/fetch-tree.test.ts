@@ -13,7 +13,7 @@ import type { Config } from "../src/config/schema.ts";
 
 const FIXTURES_DIR = resolve(
   fileURLToPath(import.meta.url),
-  "../../../../examples/davids-bridal/fixtures/aem",
+  "../../../../examples/davids-bridal/output/cache/fixtures/aem",
 );
 
 const testConfig: Config = {
@@ -250,6 +250,16 @@ describe("fetchInfinityTree — synthetic trees", () => {
     });
     expect(result.stats.markersTruncated).toBe(1);
     expect(result.stats.expansionsUsed).toBe(2);
+    // Invariant: markersFound counts every marker discovered across rounds
+    // AND the final sweep. `d` appears only in round 2's spliced result and
+    // is never a round-start marker, so the post-loop `markersFound +=
+    // markersTruncated` at fetch-tree.ts:194 is the only place it's counted.
+    expect(result.stats.markersFound).toBe(3);
+    expect(result.stats.markersFound).toBe(
+      result.stats.markersResolved +
+        result.stats.markersTruncated +
+        result.stats.markersFailed,
+    );
     // downstream `transform.ts:222` guard treats { __truncated } as opaque.
     expect(detectTruncations(result.tree, rootPath)).toEqual([]);
   });

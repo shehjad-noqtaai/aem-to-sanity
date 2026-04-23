@@ -257,14 +257,8 @@ async function lookupExistingAsset(
   assetInstanceId: string,
 ): Promise<{ assetId: string; assetInstanceId: string } | null> {
   // `sanity.asset` parent references the `sanity.imageAsset` / `sanity.fileAsset` instance.
-  const q = encodeURIComponent(`*[_type=="sanity.asset" && references($id)][0]{_id}`);
-  const p = encodeURIComponent(JSON.stringify({ id: assetInstanceId }));
-  const url = `https://${mlId}.api.sanity.io/v${apiVersion}/data/query/~?query=${q}&$id=${encodeURIComponent(JSON.stringify(assetInstanceId))}`;
-  // Simpler: use the /media-libraries/{id}/data/query endpoint format.
-  const altUrl = `https://api.sanity.io/v${apiVersion}/data/query/media-library:${mlId}?query=${q}&$id=${p.replace(/^./, "")}`;
-  // Fallback: use the JS client which handles the resource-routing. Inline
-  // dynamic import to keep the top-level module loadable even when
-  // `@sanity/client` is absent (tests, dry runs).
+  // Uses the JS client for resource-routing; dynamic import keeps the module
+  // loadable when `@sanity/client` isn't installed (tests, dry runs).
   try {
     const mod = await import("@sanity/client");
     const client = mod.createClient({
@@ -277,9 +271,20 @@ async function lookupExistingAsset(
       `*[_type=="sanity.asset" && references($id)][0]{_id}`,
       { id: assetInstanceId },
     )) as { _id: string } | null;
-    if (!parent?._id) return null;
+    if (!parent?._id) {
+      console.error(
+        `    ml-lookup: no sanity.asset parent found for instance ${assetInstanceId} (mlId=${mlId}) — treating as new upload`,
+      );
+      return null;
+    }
     return { assetId: parent._id, assetInstanceId };
-  } catch {
+  } catch (err) {
+    // Don't swallow — operators need to know why the 409 recovery failed
+    // (auth scope, network, @sanity/client missing) to decide whether the
+    // failed-upload status represents a real failure or a retrieval gap.
+    console.error(
+      `    ml-lookup failed for instance ${assetInstanceId}: ${(err as Error).message}`,
+    );
     return null;
   }
 }
@@ -364,27 +369,59 @@ function collectDamPaths(value: unknown, out: Set<string>): void {
  * In-place rewrite: `/content/dam/...` strings become `{_type:'image', asset:{_ref}}`
  * (Pattern A — matches the existing doc shape, Studio-compatible).
  * Keys ending in `AemPath` hold read-only provenance — never replaced.
+ *
+ * Tracks both successful rewrites and DAM paths that could not be rewritten
+ * (asset failed-upload / failed-link / missing from manifest). The caller
+ * surfaces `unresolved` in the summary — leaving `/content/dam/*` strings
+ * in "clean" docs is a silent data-loss path that must not ship quietly.
  */
+interface RewriteStats {
+  rewrites: number;
+  unresolved: Set<string>;
+}
+
 function rewriteDamRefs(
   value: unknown,
   manifest: Manifest,
+  stats: RewriteStats,
   propKey?: string,
 ): unknown {
   if (typeof value === "string") {
     if (value.startsWith("/content/dam/")) {
+      // `*AemPath` fields are preserved provenance, not references.
       if (propKey?.endsWith("AemPath")) return value;
       const hit = manifest[value];
-      if (hit?.sanityRef) return hit.sanityRef;
+      if (hit?.sanityRef) {
+        stats.rewrites++;
+        return hit.sanityRef;
+      }
+      stats.unresolved.add(value);
     }
     return value;
   }
   if (!value || typeof value !== "object") return value;
   if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) value[i] = rewriteDamRefs(value[i], manifest, undefined);
+    for (let i = 0; i < value.length; i++) value[i] = rewriteDamRefs(value[i], manifest, stats, undefined);
     return value;
   }
   const obj = value as Record<string, unknown>;
-  for (const key of Object.keys(obj)) obj[key] = rewriteDamRefs(obj[key], manifest, key) as unknown;
+  for (const key of Object.keys(obj)) obj[key] = rewriteDamRefs(obj[key], manifest, stats, key) as unknown;
+  // Transform parks DAM paths at `{base}AemPath` and clears `{base}` so the
+  // asset field stays empty until we fill it here (see transform.ts `splitAemFileUploadDamPaths`).
+  for (const key of Object.keys(obj)) {
+    if (!key.endsWith("AemPath")) continue;
+    const base = key.slice(0, -"AemPath".length);
+    if (!base || obj[base] !== undefined) continue;
+    const provenance = obj[key];
+    if (typeof provenance !== "string" || !provenance.startsWith("/content/dam/")) continue;
+    const hit = manifest[provenance];
+    if (hit?.sanityRef) {
+      obj[base] = hit.sanityRef;
+      stats.rewrites++;
+    } else {
+      stats.unresolved.add(provenance);
+    }
+  }
   return obj;
 }
 
@@ -399,8 +436,8 @@ async function main(): Promise<void> {
   const c = createColors({ stream: process.stderr });
   const config = resolveConfig(process.env);
   const outputDir = resolve(process.env.OUTPUT_DIR ?? "./output");
-  const cleanDir = join(outputDir, "clean");
-  const assetsDir = join(outputDir, "assets");
+  const cleanDir = join(outputDir, "cache", "clean");
+  const assetsDir = join(outputDir, "cache", "assets");
   const manifestFile = join(assetsDir, "manifest.json");
   const dryRun = process.env.MIGRATION_DRY_RUN !== "false";
   const uploadOnly = process.argv.includes("--upload-only");
@@ -515,12 +552,13 @@ async function main(): Promise<void> {
 
   // ── Phase 4: rewrite clean docs in place ────────────────────────────
   let patched = 0;
+  const rewriteStats: RewriteStats = { rewrites: 0, unresolved: new Set() };
   if (!skipRewrite && !dryRun) {
     console.error(c.bold("\n── 4. Rewrite clean docs ──"));
     for (const file of cleanFiles) {
       const filePath = join(cleanDir, file);
       const doc = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
-      rewriteDamRefs(doc, manifest);
+      rewriteDamRefs(doc, manifest, rewriteStats);
       writeFileSync(filePath, JSON.stringify(doc, null, 2) + "\n");
       patched++;
     }
@@ -538,16 +576,51 @@ async function main(): Promise<void> {
     linked: all.filter((e) => e.linkedRef).length,
     failedLink: all.filter((e) => e.status === "failed-link").length,
   };
+  const unresolvedList = [...rewriteStats.unresolved].sort();
   writeFileSync(
-    join(outputDir, "assets-report.json"),
-    JSON.stringify({ generatedAt: new Date().toISOString(), dryRun, summary: stats }, null, 2) + "\n",
+    join(outputDir, "cache", "assets-report.json"),
+    JSON.stringify(
+      {
+        generatedAt: new Date().toISOString(),
+        dryRun,
+        summary: stats,
+        rewrite: {
+          rewrites: rewriteStats.rewrites,
+          unresolvedCount: unresolvedList.length,
+          unresolved: unresolvedList,
+        },
+      },
+      null,
+      2,
+    ) + "\n",
   );
 
   console.error(c.dim("\n────────────────────────────────────────"));
   console.error(`Downloaded: ${c.green(stats.downloaded)}   Cached: ${c.dim(stats.cached)}   Failed: ${stats.failedDownload > 0 ? c.yellow(stats.failedDownload) : c.green(0)}`);
   console.error(`Uploaded:   ${c.green(stats.uploaded)}   Failed: ${stats.failedUpload > 0 ? c.yellow(stats.failedUpload) : c.green(0)}`);
   console.error(`Linked:     ${c.green(stats.linked)}   Failed: ${stats.failedLink > 0 ? c.yellow(stats.failedLink) : c.green(0)}`);
-  if (patched > 0) console.error(`Rewrote:    ${c.green(patched)} clean file(s)`);
+  if (patched > 0) {
+    console.error(`Rewrote:    ${c.green(rewriteStats.rewrites)} ref(s) across ${c.green(patched)} clean file(s)`);
+  }
+  if (unresolvedList.length > 0) {
+    // Every `/content/dam/*` string left in clean docs is a silent data-loss
+    // path at import time (the import CLI won't upload them again, and Studio
+    // renders them as broken strings in image/file fields). Surface loudly.
+    console.error(
+      c.yellow(
+        `\n⚠  ${unresolvedList.length} DAM path(s) remain as raw strings in clean docs — import will render them as broken refs.`,
+      ),
+    );
+    for (const p of unresolvedList.slice(0, 5)) {
+      const hit = manifest[p];
+      const reason = hit?.status ?? "missing-from-manifest";
+      const err = hit?.error ? ` — ${hit.error.slice(0, 80)}` : "";
+      console.error(`    ${c.dim(reason)} ${p}${c.dim(err)}`);
+    }
+    if (unresolvedList.length > 5) {
+      console.error(c.dim(`    … and ${unresolvedList.length - 5} more (full list in assets-report.json)`));
+    }
+  }
   console.error(`Manifest:   ${c.dim(manifestFile)}`);
 }
 

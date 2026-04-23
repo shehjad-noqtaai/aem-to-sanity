@@ -113,7 +113,7 @@ Commerce Integration Framework (CIF) product picker — authored value is a Mage
 
 <details><summary>Expand</summary>
 
-Touches every major content module (hero-banner, editorial grids, appointments, trends, carousels, store-locator, seo-sitemap, personalized-sales/style, dbi-product-recommendations, message-banner, image-disruptor, …). See `scripts/aggregate-unmapped.json` for the full per-component field list.
+Touches every major content module (hero-banner, editorial grids, appointments, trends, carousels, store-locator, seo-sitemap, personalized-sales/style, dbi-product-recommendations, message-banner, image-disruptor, …). Full per-component field list is in `output/audit/unmapped-examples.json` (regenerate with the schema step).
 
 </details>
 
@@ -268,6 +268,4 @@ After the plan is updated, applying these to `src/mapping-table.ts` (+ the two m
 ## Source data
 
 - Raw report: `output/migration-report.json`
-- Aggregated (by resource type): `scripts/aggregate-unmapped.json`
-- Per-component index: `scripts/per-component-unmapped.json`
-- Example AEM nodes: `scripts/unmapped-examples.json`
+- Example AEM nodes (one per unmapped resource type): `output/audit/unmapped-examples.json` — produced by the audit step promoted into `packages/aem-to-sanity-schema/src/audit.ts`.

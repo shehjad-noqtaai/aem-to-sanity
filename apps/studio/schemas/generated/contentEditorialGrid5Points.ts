@@ -9,14 +9,8 @@ export const contentEditorialGrid5Points = defineType({
   title: "Editorial Grid - 5 Points",
   type: "object",
   preview: {
-    select: {
-      prMedia: "desktopImage1",
-    },
-    prepare({ prMedia }) {
-      return {
-        title: "Editorial Grid - 5 Points",
-        media: prMedia,
-      };
+    prepare() {
+      return { title: "Editorial Grid - 5 Points" };
     },
   },
   fields: [
@@ -75,13 +69,13 @@ export const contentEditorialGrid5Points = defineType({
       name: "desktopImage1",
       title: "Image 1 Desktop",
       description: "Image 1 Desktop",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "mobileImage1",
       title: "Image 1 Mobile",
       description: "Image 1 Mobile",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "imageAltText1",
@@ -125,13 +119,13 @@ export const contentEditorialGrid5Points = defineType({
       name: "desktopImage2",
       title: "Image 2 Desktop",
       description: "Image 2 Desktop",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "mobileImage2",
       title: "Image 2 Mobile",
       description: "Image 2 Mobile",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "imageAltText2",
@@ -175,13 +169,13 @@ export const contentEditorialGrid5Points = defineType({
       name: "desktopImage3",
       title: "Image 3 Desktop",
       description: "Image 3 Desktop",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "mobileImage3",
       title: "Image 3 Mobile",
       description: "Image 3 Mobile",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "imageAltText3",
@@ -225,13 +219,13 @@ export const contentEditorialGrid5Points = defineType({
       name: "desktopImage4",
       title: "Image 4 Desktop",
       description: "Image 4 Desktop",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "mobileImage4",
       title: "Image 4 Mobile",
       description: "Image 4 Mobile",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "imageAltText4",
@@ -275,13 +269,13 @@ export const contentEditorialGrid5Points = defineType({
       name: "desktopImage5",
       title: "Image 5 Desktop",
       description: "Image 5 Desktop",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "mobileImage5",
       title: "Image 5 Mobile",
       description: "Image 5 Mobile",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "imageAltText5",

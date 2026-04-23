@@ -7,6 +7,9 @@ import { runTypegen } from "./typegen/index.ts";
 
 async function main(): Promise<void> {
   const outputDir = resolve(process.env.OUTPUT_DIR ?? "./output");
+  const schemasDir = process.env.SCHEMAS_OUT_DIR
+    ? resolve(process.env.SCHEMAS_OUT_DIR)
+    : undefined;
   const logger = createLogger({ level: "info" });
 
   logger.info(`typegen: synthesizing config under ${outputDir}/.typegen`);
@@ -15,6 +18,7 @@ async function main(): Promise<void> {
   const selfDir = dirname(fileURLToPath(import.meta.url));
   const result = await runTypegen({
     outputDir,
+    schemasDir,
     projectId: process.env.SANITY_PROJECT_ID,
     dataset: process.env.SANITY_DATASET,
     binCwd: selfDir,

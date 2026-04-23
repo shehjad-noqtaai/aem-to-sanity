@@ -17,8 +17,14 @@ export const contentDbiAppointments = defineType({
     },
   ],
   preview: {
-    prepare() {
-      return { title: "DBI Appointments" };
+    select: {
+      prMedia: "googleIcon",
+    },
+    prepare({ prMedia }) {
+      return {
+        title: "DBI Appointments",
+        media: prMedia,
+      };
     },
   },
   fields: [
@@ -49,7 +55,7 @@ export const contentDbiAppointments = defineType({
               name: "appointmentIcon",
               title: "Appointment Icon",
               description: "Path of the appointment icon",
-              type: "string",
+              type: "image",
             }),
             defineField({
               name: "appointmentTitle",
@@ -90,7 +96,7 @@ export const contentDbiAppointments = defineType({
       name: "googleIcon",
       title: "Google Icon",
       description: "Path of the google icon",
-      type: "string",
+      type: "image",
       group: "appointmentCalendarIConImageUrLs",
       validation: (Rule) => Rule.required(),
     }),
@@ -98,7 +104,7 @@ export const contentDbiAppointments = defineType({
       name: "yahooIcon",
       title: "Yahoo Icon",
       description: "Path of the yahoo icon",
-      type: "string",
+      type: "image",
       group: "appointmentCalendarIConImageUrLs",
       validation: (Rule) => Rule.required(),
     }),
@@ -106,7 +112,7 @@ export const contentDbiAppointments = defineType({
       name: "outlookIcon",
       title: "Outlook Icon",
       description: "Path of the outlook icon",
-      type: "string",
+      type: "image",
       group: "appointmentCalendarIConImageUrLs",
       validation: (Rule) => Rule.required(),
     }),
@@ -114,7 +120,7 @@ export const contentDbiAppointments = defineType({
       name: "calendarIcon",
       title: "Calendar Icon",
       description: "Path of the calendar icon",
-      type: "string",
+      type: "image",
       group: "appointmentCalendarIConImageUrLs",
       validation: (Rule) => Rule.required(),
     }),
@@ -122,7 +128,7 @@ export const contentDbiAppointments = defineType({
       name: "officeIcon",
       title: "Office Icon",
       description: "Path of the office icon",
-      type: "string",
+      type: "image",
       group: "appointmentCalendarIConImageUrLs",
       validation: (Rule) => Rule.required(),
     }),

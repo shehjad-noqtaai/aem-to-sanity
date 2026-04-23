@@ -6,8 +6,10 @@ import { runSanityCli, runExternalCli } from "./run.ts";
 import { EXTRACT_SCRIPT_SRC } from "./extract-script.ts";
 
 export interface RunTypegenOptions {
-  /** Root output directory (where `schemas/*.ts` already live). */
+  /** Root output directory (hosts the synthesized typegen workspace + schema.json + sanity.types.ts). */
   outputDir: string;
+  /** Directory holding the emitted schema .ts files. Defaults to `{outputDir}/schemas`. */
+  schemasDir?: string;
   /** Optional real project id — otherwise a placeholder is used. */
   projectId?: string;
   /** Optional dataset — otherwise "production". */
@@ -48,9 +50,11 @@ export async function runTypegen(
 ): Promise<RunTypegenResult> {
   const { outputDir, projectId, dataset, workspaceName, logger } = opts;
   const binCwd = opts.binCwd ?? outputDir;
+  const schemasDir = opts.schemasDir ?? join(outputDir, "schemas");
 
   const synthesized = await synthesizeSanityConfig({
     outputDir,
+    schemasDir,
     projectId,
     dataset,
     workspaceName,
@@ -63,7 +67,6 @@ export async function runTypegen(
   // --- Step 2: in-process schema extraction via tsx -----------------------
   const extractScriptPath = join(synthesized.typegenDir, "extract.mts");
   await writeTextFile(extractScriptPath, EXTRACT_SCRIPT_SRC);
-  const schemasDir = join(outputDir, "schemas");
 
   await runExternalCli({
     cwd: synthesized.typegenDir,

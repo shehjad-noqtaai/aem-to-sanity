@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   AemFetchError,
+  applyFixturesFromEnv,
   createColors,
   fetchInfinityTree,
   resolveConfig,
@@ -65,8 +66,22 @@ function encodeFilename(jcrPath: string): string {
   return jcrPath.replace(/^\/+/, "").replace(/[^A-Za-z0-9_-]/g, "_") + ".json";
 }
 
-function categorize(message: string): "notFound" | "ambiguous" | "auth" | "tooLarge" | "other" {
-  const m = message.toLowerCase();
+type FailureCategory = "notFound" | "ambiguous" | "auth" | "tooLarge" | "other";
+
+function categorize(err: unknown): FailureCategory {
+  // Prefer structured fields when we have them — message text is a fragile
+  // signal. AemFetchError("auth") comes with details.status=401|403 and a
+  // message like "Authentication failed (401) for ..." which the old
+  // string-sniffing regex (`http 401`) missed entirely.
+  if (err instanceof AemFetchError) {
+    if (err.kind === "auth") return "auth";
+    if (err.kind === "tooLarge") return "tooLarge";
+    const status = err.details?.status;
+    if (status === 404) return "notFound";
+    if (status === 300) return "ambiguous";
+    if (status === 401 || status === 403) return "auth";
+  }
+  const m = (err instanceof Error ? err.message : String(err)).toLowerCase();
   if (m.includes("http 404")) return "notFound";
   if (m.includes("http 300")) return "ambiguous";
   if (m.includes("http 401") || m.includes("http 403")) return "auth";
@@ -88,13 +103,13 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const rawDir = join(outputDir, "raw");
+  const rawDir = join(outputDir, "cache", "raw");
   mkdirSync(rawDir, { recursive: true });
 
   console.error(`[extract] ${entries.length} root(s) from ${config.baseUrl} → ${rawDir}`);
 
   const ambiguous: Array<{ rootPath: string; resolution: AmbiguousResolution }> = [];
-  const failures: Array<{ rootPath: string; message: string; category: ReturnType<typeof categorize> }> = [];
+  const failures: Array<{ rootPath: string; message: string; category: FailureCategory }> = [];
   const depthExpansions: Array<{
     rootPath: string;
     markersFound: number;
@@ -115,7 +130,7 @@ async function main(): Promise<void> {
       continue;
     }
     try {
-      const { tree, stats } = await fetchInfinityTree({ config }, entry.jcrPath, {
+      const { tree, stats } = await fetchInfinityTree(applyFixturesFromEnv({ config }), entry.jcrPath, {
         maxResponseBytes: maxBytes,
         onAmbiguous: (resolution) => ambiguous.push({ rootPath: entry.jcrPath, resolution }),
         maxDepthExpansions,
@@ -148,7 +163,7 @@ async function main(): Promise<void> {
       downloaded++;
     } catch (err) {
       const message = err instanceof AemFetchError ? err.message : (err as Error).message;
-      failures.push({ rootPath: entry.jcrPath, message, category: categorize(message) });
+      failures.push({ rootPath: entry.jcrPath, message, category: categorize(err) });
     }
   }
 
@@ -179,12 +194,12 @@ async function main(): Promise<void> {
     depthExpansions,
     failures,
   };
-  const reportFile = join(outputDir, "extract-report.json");
+  const reportFile = join(outputDir, "cache", "extract-report.json");
   mkdirSync(dirname(reportFile), { recursive: true });
   writeFileSync(reportFile, JSON.stringify(report, null, 2) + "\n", "utf8");
 
   const notFound = failures.filter((f) => f.category === "notFound");
-  const notFoundLog = join(outputDir, "extract-404.log");
+  const notFoundLog = join(outputDir, "cache", "extract-404.log");
   if (notFound.length > 0) {
     const lines = notFound.map((f) => `${f.rootPath}\t${config.baseUrl}${f.rootPath}.infinity.json`);
     writeFileSync(notFoundLog, lines.join("\n") + "\n", "utf8");

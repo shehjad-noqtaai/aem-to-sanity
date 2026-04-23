@@ -1,22 +1,16 @@
 import { defineField, defineType } from "sanity";
 
 /**
- * Generated from AEM component: /apps/dbi/components/content/editorial-grid-3-points-small-text-layout
+ * Generated from AEM component: /apps/dbi/components/content/dbi-personalized-style
  * DO NOT EDIT BY HAND — regenerate via `pnpm migrate:schema`.
  */
-export const contentEditorialGrid3PointsSmallTextLayout = defineType({
-  name: "contentEditorialGrid3PointsSmallTextLayout",
-  title: "Editorial Grid - 3 Points Small Text Layout",
+export const contentDbiPersonalizedStyle = defineType({
+  name: "contentDbiPersonalizedStyle",
+  title: "4 Point Editorial Grid",
   type: "object",
   preview: {
-    select: {
-      prMedia: "imageDesktop",
-    },
-    prepare({ prMedia }) {
-      return {
-        title: "Editorial Grid - 3 Points Small Text Layout",
-        media: prMedia,
-      };
+    prepare() {
+      return { title: "4 Point Editorial Grid" };
     },
   },
   fields: [
@@ -27,25 +21,8 @@ export const contentEditorialGrid3PointsSmallTextLayout = defineType({
       type: "string",
     }),
     defineField({
-      name: "backdropSelection",
-      title: "Backdrop",
-      type: "string",
-      options: {
-        list: [
-          { title: "Full Backdrop", value: "component-backdrop--full" },
-          { title: "Half Backdrop", value: "component-backdrop--half" },
-          { title: "Offset Backdrop", value: "component-backdrop--offset" },
-          { title: "Overlap Backdrop", value: "component-backdrop--overlap" },
-          {
-            title: "Offset Mid Left Backdrop",
-            value: "component-backdrop__offset--mid-left",
-          },
-        ],
-      },
-    }),
-    defineField({
-      name: "scriptTitle",
-      title: "Script Title",
+      name: "scriptText",
+      title: "Script Text",
       description: "Handwritten subtitle",
       type: "string",
     }),
@@ -56,16 +33,28 @@ export const contentEditorialGrid3PointsSmallTextLayout = defineType({
       type: "string",
     }),
     defineField({
+      name: "scriptCopy",
+      title: "Script Copy",
+      description: "Copy Hand Writting",
+      type: "string",
+    }),
+    defineField({
+      name: "scriptCopyAuthor",
+      title: "Script Copy Author",
+      description: "For giving author's name",
+      type: "string",
+    }),
+    defineField({
       name: "imageDesktop",
       title: "Desktop Image",
-      description: "Give Desktop Image",
-      type: "image",
+      description: "Desktop Image",
+      type: "string",
     }),
     defineField({
       name: "imageMobile",
       title: "Mobile Image",
-      description: "Give Mobile Image",
-      type: "image",
+      description: "Mobile Image",
+      type: "string",
     }),
     defineField({
       name: "imageCtaText",
@@ -74,14 +63,14 @@ export const contentEditorialGrid3PointsSmallTextLayout = defineType({
       type: "string",
     }),
     defineField({
-      name: "ctaCategoryPath1",
+      name: "imageCtaCategoryPath",
       title: "PLP Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifcategoryfield". Falling back to string.',
       type: "string",
     }),
     defineField({
-      name: "ctaProductPath1",
+      name: "imageCtaProductPath",
       title: "Product Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifproductfield". Falling back to string.',
@@ -91,7 +80,7 @@ export const contentEditorialGrid3PointsSmallTextLayout = defineType({
       name: "imageCtaLink",
       title: "Image Cta Link",
       description: "Image Cta Link",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "altText",
@@ -107,15 +96,15 @@ export const contentEditorialGrid3PointsSmallTextLayout = defineType({
     }),
     defineField({
       name: "secondImageDesktop",
-      title: "Desktop Image",
-      description: "Give Desktop Image",
-      type: "image",
+      title: "Second Desktop Image Desktop",
+      description: "Second  Desktop Image",
+      type: "string",
     }),
     defineField({
       name: "secondImageMobile",
-      title: "Mobile Image",
-      description: "Give Mobile Image",
-      type: "image",
+      title: "Second Mobile Image",
+      description: "Second Mobile Image  ",
+      type: "string",
     }),
     defineField({
       name: "secondImageCtaText",
@@ -124,14 +113,14 @@ export const contentEditorialGrid3PointsSmallTextLayout = defineType({
       type: "string",
     }),
     defineField({
-      name: "ctaCategoryPath2",
+      name: "secondImageCtaCategoryPath",
       title: "PLP Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifcategoryfield". Falling back to string.',
       type: "string",
     }),
     defineField({
-      name: "ctaProductPath2",
+      name: "secondImageCtaProductPath",
       title: "Product Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifproductfield". Falling back to string.',
@@ -141,7 +130,7 @@ export const contentEditorialGrid3PointsSmallTextLayout = defineType({
       name: "secondImageCtaLink",
       title: "Second Image Cta Link",
       description: "Image Cta Link",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "secondAltText",
@@ -157,15 +146,15 @@ export const contentEditorialGrid3PointsSmallTextLayout = defineType({
     }),
     defineField({
       name: "thirdImageDesktop",
-      title: "Desktop Image",
-      description: "Give Desktop Image",
-      type: "image",
+      title: "Third Desktop Image",
+      description: "Third Desktop Image",
+      type: "string",
     }),
     defineField({
       name: "thirdImageMobile",
-      title: "Mobile Image",
-      description: "Give Mobile Image",
-      type: "image",
+      title: "Third Mobile Image",
+      description: "Third Mobile Image",
+      type: "string",
     }),
     defineField({
       name: "thirdImageCtaText",
@@ -174,14 +163,14 @@ export const contentEditorialGrid3PointsSmallTextLayout = defineType({
       type: "string",
     }),
     defineField({
-      name: "ctaCategoryPath3",
+      name: "thirdImageCtaCategoryPath",
       title: "PLP Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifcategoryfield". Falling back to string.',
       type: "string",
     }),
     defineField({
-      name: "ctaProductPath3",
+      name: "thirdImageCtaProductPath",
       title: "Product Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifproductfield". Falling back to string.',
@@ -191,7 +180,7 @@ export const contentEditorialGrid3PointsSmallTextLayout = defineType({
       name: "thirdImageCtaLink",
       title: "Third Image Cta Link",
       description: "Image Cta Link",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "thirdAltText",
@@ -206,30 +195,79 @@ export const contentEditorialGrid3PointsSmallTextLayout = defineType({
       type: "string",
     }),
     defineField({
-      name: "bottomCtaText",
-      title: "Bottom Cta Text",
-      description: "Text for the Link at the Bottom",
-      type: "text",
+      name: "fourthImageDesktop",
+      title: "Fourth Desktop Image",
+      description: "Fourth Desktop Image",
+      type: "string",
     }),
     defineField({
-      name: "ctaCategoryPath4",
+      name: "fourthImageMobile",
+      title: "Fourth Mobile Image",
+      description: "Fourth Mobile Image",
+      type: "string",
+    }),
+    defineField({
+      name: "fourthImageCtaText",
+      title: "Fourth Image Cta Text",
+      description: "Image Cta Text",
+      type: "string",
+    }),
+    defineField({
+      name: "fourthImageCtaCategoryPath",
       title: "PLP Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifcategoryfield". Falling back to string.',
       type: "string",
     }),
     defineField({
-      name: "ctaProductPath4",
+      name: "fourthImageCtaProductPath",
       title: "Product Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifproductfield". Falling back to string.',
       type: "string",
     }),
     defineField({
+      name: "fourthImageCtaLink",
+      title: "Fourth Image Cta Link",
+      description: "Image Cta Link",
+      type: "string",
+    }),
+    defineField({
+      name: "fourthTitleTag",
+      title: "Fourth Title Tag",
+      description: "Fourth Title Tag",
+      type: "string",
+    }),
+    defineField({
+      name: "fourthAltText",
+      title: "Fourth Alt Text",
+      description: "Fourth Alt Text",
+      type: "string",
+    }),
+    defineField({
+      name: "bottomCtaText",
+      title: "Bottom Cta Text",
+      description: "Text for the Link at the Bottom",
+      type: "text",
+    }),
+    defineField({
       name: "bottomCtaLink",
       title: "Bottom Cta Link",
       description: "Link at the Bottom",
       type: "string",
+    }),
+    defineField({
+      name: "backdropSelection",
+      title: "Backdrop",
+      type: "string",
+      options: {
+        list: [
+          { title: "Full Backdrop", value: "component-backdrop--full" },
+          { title: "Half Backdrop", value: "component-backdrop--half" },
+          { title: "Offset Backdrop", value: "component-backdrop--offset" },
+          { title: "Overlap Backdrop", value: "component-backdrop--overlap" },
+        ],
+      },
     }),
   ],
 });

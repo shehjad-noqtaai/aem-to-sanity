@@ -42,12 +42,22 @@ describe("isPathbrowserImage", () => {
     assert.equal(isPathbrowserImage(node, "ctaLink"), true);
   });
 
-  it("returns true when the resolved field name matches /image/i", () => {
+  it("returns true when the last name token is 'image'", () => {
     const node = { rootPath: "/content", name: "./desktopImage" } as unknown as DialogNode;
     assert.equal(isPathbrowserImage(node, "desktopImage"), true);
   });
 
-  it("matches case-insensitively on 'image'", () => {
+  it("returns true for a bare 'image' field", () => {
+    const node = { rootPath: "/content" } as unknown as DialogNode;
+    assert.equal(isPathbrowserImage(node, "image"), true);
+  });
+
+  it("returns true for an 'img' suffix", () => {
+    const node = { rootPath: "/content" } as unknown as DialogNode;
+    assert.equal(isPathbrowserImage(node, "heroImg"), true);
+  });
+
+  it("matches case-insensitively on a trailing ALL-CAPS 'IMAGE'", () => {
     const node = { rootPath: "/content" } as unknown as DialogNode;
     assert.equal(isPathbrowserImage(node, "MobileIMAGE"), true);
   });
@@ -61,6 +71,21 @@ describe("isPathbrowserImage", () => {
     const node = { name: "./navigationPath" } as unknown as DialogNode;
     assert.equal(isPathbrowserImage(node, "navigationPath"), false);
   });
+
+  // Regression: the earlier `/image/i` substring rule mis-routed these.
+  for (const stringField of [
+    "preImageLink",
+    "bgImagePath",
+    "imageCaptionText",
+    "imageSrc",
+    "imageUrl",
+    "imageAltText",
+  ]) {
+    it(`returns false for '${stringField}' (image token is not the last word)`, () => {
+      const node = { rootPath: "/content" } as unknown as DialogNode;
+      assert.equal(isPathbrowserImage(node, stringField), false);
+    });
+  }
 });
 
 describe("mapDialog: pathbrowser routing", () => {
@@ -151,5 +176,33 @@ describe("mapDialog: pathbrowser routing", () => {
     const { fields, unmapped } = await mapDialog(dialog, noFetch);
     assert.equal(unmapped.length, 0);
     assert.equal(fields[0].type, "image");
+  });
+
+  it("pathfield routes to `image` when rootPath is under /content/dam", async () => {
+    // Consistency with pathbrowser: a pathfield pointed at DAM is the same
+    // intent — an asset picker stored as a path — so it should also become
+    // a Sanity `image`.
+    const dialog = dialogWith("damPicker", {
+      "sling:resourceType": "granite/ui/components/coral/foundation/form/pathfield",
+      rootPath: "/content/dam/dbi",
+      name: "./backgroundAsset",
+      fieldLabel: "Background Asset",
+    } as unknown as DialogNode);
+
+    const { fields, unmapped } = await mapDialog(dialog, noFetch);
+    assert.equal(unmapped.length, 0);
+    assert.equal(fields[0].type, "image");
+  });
+
+  it("pathfield stays `string` for non-DAM rootPath with a link-style name", async () => {
+    const dialog = dialogWith("ctaLink", {
+      "sling:resourceType": "granite/ui/components/coral/foundation/form/pathfield",
+      rootPath: "/content",
+      name: "./ctaLink",
+      fieldLabel: "CTA Link",
+    } as unknown as DialogNode);
+
+    const { fields } = await mapDialog(dialog, noFetch);
+    assert.equal(fields[0].type, "string");
   });
 });

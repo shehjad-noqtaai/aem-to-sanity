@@ -16,6 +16,7 @@ export type {
   FetchInfinityOptions,
 } from "./fetcher.ts";
 export {
+  applyFixturesFromEnv,
   buildFixturesFetch,
   fixtureFilenameForUrl,
   lookupFixture,

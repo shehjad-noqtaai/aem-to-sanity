@@ -34,7 +34,7 @@ export interface MigrateSchemasOptions {
   outputDir: string;
   concurrency?: number;
   logger?: Logger;
-  /** Persist each component's raw dialog JSON to `{outputDir}/aem/components/`. Defaults to true. */
+  /** Persist each component's raw dialog JSON to `{outputDir}/cache/aem/components/`. Defaults to true. */
   writeAemSnapshot?: boolean;
   /** Run the unmapped-type audit after the main pass. Defaults to true. */
   runAudit?: boolean;
@@ -57,10 +57,35 @@ export interface MigrateSchemasOptions {
    * absence of the `__generated` marker).
    */
   emitContentRegistry?: boolean;
-  /** Path for the generated registry. Default: `{outputDir}/content-type-registry.json`. */
+  /** Path for the generated registry. Default: `{outputDir}/cache/content-type-registry.json`. */
   contentRegistryFile?: string;
   /** JCR prefix to strip from component paths when deriving `sling:resourceType`. Default: `/apps/`. */
   jcrPrefix?: string;
+  /**
+   * Where the generated schema .ts files (component schemas + page.ts +
+   * pageBuilder.ts + index.ts barrel) are written. Defaults to
+   * `{outputDir}/schemas`. Set this when the consumer (e.g. a Sanity Studio
+   * app) wants the schemas under its own tree — keeps schema emission
+   * decoupled from `outputDir`, which holds only regenerable cache state.
+   */
+  schemasDir?: string;
+  /**
+   * Treat per-component 401/403 failures as skips (logged + reported) rather
+   * than aborting the whole batch. Matches the "unknown shapes are audit
+   * findings, not failures" invariant for components that exist in AEM but
+   * whose dialog is ACL-denied to the caller.
+   *
+   * Circuit breaker: if no component succeeds within the first
+   * `authCircuitBreakerThreshold` auth failures (default 5), the batch still
+   * aborts — that pattern signals credentials-wide failure (wrong password,
+   * expired token) rather than per-path ACL denial, and continuing just
+   * hammers AEM toward an account lockout.
+   *
+   * Default: false (existing behaviour — any auth failure aborts).
+   */
+  continueOnAuth?: boolean;
+  /** Threshold for the `continueOnAuth` circuit breaker. Default: 5. */
+  authCircuitBreakerThreshold?: number;
 }
 
 export interface MigrateSchemasResult {
@@ -91,8 +116,14 @@ export async function migrateSchemas(
     jcrPrefix,
   } = opts;
   const concurrency = opts.concurrency ?? 4;
+  const continueOnAuth = opts.continueOnAuth ?? false;
+  const authCircuitBreakerThreshold = opts.authCircuitBreakerThreshold ?? 5;
+  const schemasDir = opts.schemasDir ?? join(outputDir, "schemas");
 
   const report = new Report();
+
+  let authFailures = 0;
+  let successes = 0;
 
   await runWithConcurrency(
     componentPaths,
@@ -100,16 +131,35 @@ export async function migrateSchemas(
       processOne(p, {
         fetcher,
         outputDir,
+        schemasDir,
         report,
         logger,
         writeAemSnapshot,
         regenerateCommand,
       }),
     concurrency,
-    (r) => ({ shouldAbort: r.authFailure }),
+    (r) => {
+      if (r.success) successes++;
+      if (r.authFailure) authFailures++;
+      if (!continueOnAuth) return { shouldAbort: r.authFailure };
+      // continueOnAuth: only abort if we've seen N auth failures in a row with
+      // zero successes — signals credentials-wide failure, not per-path ACL.
+      if (successes === 0 && authFailures >= authCircuitBreakerThreshold) {
+        logger?.error(
+          `continueOnAuth: ${authFailures} consecutive auth failures with 0 successes — circuit breaker tripped, aborting to avoid account lockout.`,
+        );
+        return { shouldAbort: true };
+      }
+      if (r.authFailure) {
+        logger?.warn(
+          `Auth failure on a component — treating as per-path ACL denial and continuing (continueOnAuth=true).`,
+        );
+      }
+      return { shouldAbort: false };
+    },
   );
 
-  const reportFile = join(outputDir, "migration-report.json");
+  const reportFile = join(outputDir, "cache", "migration-report.json");
   await report.write(reportFile);
   const successTypeNames = report.results
     .filter((r): r is Extract<typeof r, { status: "success" }> => r.status === "success")
@@ -119,7 +169,7 @@ export async function migrateSchemas(
   let pageFile: string | undefined;
   if (emitPageBuilder) {
     const pb = await writePageBuilderArtifacts({
-      outputDir,
+      schemasDir,
       componentTypeNames: successTypeNames,
       exclude: pageBuilderExclude,
       logger,
@@ -128,14 +178,14 @@ export async function migrateSchemas(
     pageFile = pb.pageFile;
   }
 
-  await pruneGeneratedSchemaFiles(outputDir, successTypeNames, { emitPageBuilder, logger });
+  await pruneGeneratedSchemaFiles(schemasDir, successTypeNames, { emitPageBuilder, logger });
 
   if (emitPageBuilder) {
     // Prefer filenames on disk so `index.ts` never imports a missing `.ts`
     // (e.g. if a write races or a stale checkout diverges from the report).
-    await rewriteBarrelFromDisk(outputDir);
+    await rewriteBarrelFromDisk(schemasDir);
   } else {
-    await writeSchemasBarrel(outputDir, report, { emitPageBuilder: false });
+    await writeSchemasBarrel(schemasDir, report, { emitPageBuilder: false });
   }
 
   if (docsOutputFile) {
@@ -156,7 +206,7 @@ export async function migrateSchemas(
 
   let registryFile: string | undefined;
   if (emitContentRegistry) {
-    const file = contentRegistryFile ?? join(outputDir, "content-type-registry.json");
+    const file = contentRegistryFile ?? join(outputDir, "cache", "content-type-registry.json");
     const r = await writeContentRegistry({
       outputFile: file,
       report,
@@ -179,6 +229,7 @@ export async function migrateSchemas(
 interface ProcessOneDeps {
   fetcher: NodeFetcher;
   outputDir: string;
+  schemasDir: string;
   report: Report;
   logger?: Logger;
   writeAemSnapshot: boolean;
@@ -205,8 +256,8 @@ function embeddedCqDialog(node: DialogNode): DialogNode | undefined {
 async function processOne(
   componentPath: string,
   deps: ProcessOneDeps,
-): Promise<{ authFailure: boolean }> {
-  const { fetcher, outputDir, report, writeAemSnapshot, regenerateCommand } =
+): Promise<{ authFailure: boolean; success: boolean }> {
+  const { fetcher, outputDir, schemasDir, report, writeAemSnapshot, regenerateCommand } =
     deps;
   const typeName = componentPathToTypeName(componentPath);
 
@@ -233,7 +284,7 @@ async function processOne(
         message: err.message,
         bodyExcerpt: err.details?.bodyExcerpt,
       });
-      return { authFailure: err.kind === "auth" };
+      return { authFailure: err.kind === "auth", success: false };
     }
     report.add({
       status: "failure",
@@ -241,7 +292,7 @@ async function processOne(
       kind: "network",
       message: (err as Error).message,
     });
-    return { authFailure: false };
+    return { authFailure: false, success: false };
   }
 
   if (writeAemSnapshot) {
@@ -258,7 +309,7 @@ async function processOne(
       kind: "mappingError",
       message: (err as Error).message,
     });
-    return { authFailure: false };
+    return { authFailure: false, success: false };
   }
 
   let contents: string;
@@ -278,10 +329,10 @@ async function processOne(
       kind: "mappingError",
       message: `emitter failed: ${(err as Error).message}`,
     });
-    return { authFailure: false };
+    return { authFailure: false, success: false };
   }
 
-  const outputFile = join(outputDir, "schemas", `${typeName}.ts`);
+  const outputFile = join(schemasDir, `${typeName}.ts`);
   try {
     await writeTextFile(outputFile, contents);
   } catch (err) {
@@ -291,7 +342,7 @@ async function processOne(
       kind: "writeError",
       message: (err as Error).message,
     });
-    return { authFailure: false };
+    return { authFailure: false, success: false };
   }
 
   report.add({
@@ -303,15 +354,14 @@ async function processOne(
     unmapped: mapped.unmapped,
     renamed: mapped.renamed,
   });
-  return { authFailure: false };
+  return { authFailure: false, success: true };
 }
 
 async function pruneGeneratedSchemaFiles(
-  outputDir: string,
+  schemasDir: string,
   componentTypeNames: string[],
   opts: { emitPageBuilder: boolean; logger?: Logger },
 ): Promise<void> {
-  const schemasDir = join(outputDir, "schemas");
   let entries: string[];
   try {
     entries = await readdir(schemasDir);
@@ -357,7 +407,7 @@ async function pruneGeneratedSchemaFiles(
  * schemas on disk.
  */
 async function writeSchemasBarrel(
-  outputDir: string,
+  schemasDir: string,
   report: Report,
   opts: { emitPageBuilder: boolean },
 ): Promise<void> {
@@ -382,7 +432,7 @@ export const allSchemaTypes = [${list}];
 ${allNames.map((n) => `export { ${n} };`).join("\n")}
 `;
 
-  const file = join(outputDir, "schemas", "index.ts");
+  const file = join(schemasDir, "index.ts");
   await writeTextFile(file, src);
 }
 
@@ -393,7 +443,7 @@ async function saveDialogJson(
   logger?: Logger,
 ): Promise<void> {
   const rel = componentPath.replace(/^\/+/, "");
-  const file = join(outputDir, "aem", "components", `${rel}.json`);
+  const file = join(outputDir, "cache", "aem", "components", `${rel}.json`);
   try {
     await writeJson(file, dialog, { pretty: true });
   } catch (err) {
