@@ -7,10 +7,10 @@ const projectId =
   process.env.SANITY_STUDIO_PROJECT_ID ?? process.env.SANITY_PROJECT_ID ?? "";
 const dataset =
   process.env.SANITY_STUDIO_DATASET ?? process.env.SANITY_DATASET ?? "production";
+const appId =
+  process.env.SANITY_STUDIO_APP_ID ?? process.env.SANITY_APP_ID ?? "";
 
 export default defineCliConfig({
   api: { projectId, dataset },
-  deployment: {
-    appId: 'j4j4yy6ymbsjwjrkcu3w81ik',
-  }
+  deployment: appId ? { appId } : undefined,
 });
