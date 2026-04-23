@@ -3,8 +3,10 @@ import { join, relative } from "node:path";
 import { ensureDir, writeTextFile } from "aem-to-sanity-core";
 
 export interface SynthesizeConfigOptions {
-  /** Root output directory (where `schemas/*.ts` live). */
+  /** Root output directory (hosts the `.typegen/` scratch workspace). */
   outputDir: string;
+  /** Directory holding the emitted schema .ts files. Defaults to `{outputDir}/schemas`. */
+  schemasDir?: string;
   /** Placeholder project id used in the throwaway config. */
   projectId?: string;
   /** Placeholder dataset name. */
@@ -49,8 +51,7 @@ export async function synthesizeSanityConfig(
     dataset = "production",
     workspaceName = "default",
   } = opts;
-
-  const schemasDir = join(outputDir, "schemas");
+  const schemasDir = opts.schemasDir ?? join(outputDir, "schemas");
   const schemaFiles = (await readdir(schemasDir))
     .filter((f) => f.endsWith(".ts"))
     .map((f) => join(schemasDir, f))

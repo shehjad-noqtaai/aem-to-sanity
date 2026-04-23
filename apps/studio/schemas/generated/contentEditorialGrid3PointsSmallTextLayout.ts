@@ -1,12 +1,12 @@
 import { defineField, defineType } from "sanity";
 
 /**
- * Generated from AEM component: /apps/dbi/components/content/dbi-personalized-style
+ * Generated from AEM component: /apps/dbi/components/content/editorial-grid-3-points-small-text-layout
  * DO NOT EDIT BY HAND — regenerate via `pnpm migrate:schema`.
  */
-export const contentDbiPersonalizedStyle = defineType({
-  name: "contentDbiPersonalizedStyle",
-  title: "4 Point Editorial Grid",
+export const contentEditorialGrid3PointsSmallTextLayout = defineType({
+  name: "contentEditorialGrid3PointsSmallTextLayout",
+  title: "Editorial Grid - 3 Points Small Text Layout",
   type: "object",
   preview: {
     select: {
@@ -14,7 +14,7 @@ export const contentDbiPersonalizedStyle = defineType({
     },
     prepare({ prMedia }) {
       return {
-        title: "4 Point Editorial Grid",
+        title: "Editorial Grid - 3 Points Small Text Layout",
         media: prMedia,
       };
     },
@@ -27,8 +27,25 @@ export const contentDbiPersonalizedStyle = defineType({
       type: "string",
     }),
     defineField({
-      name: "scriptText",
-      title: "Script Text",
+      name: "backdropSelection",
+      title: "Backdrop",
+      type: "string",
+      options: {
+        list: [
+          { title: "Full Backdrop", value: "component-backdrop--full" },
+          { title: "Half Backdrop", value: "component-backdrop--half" },
+          { title: "Offset Backdrop", value: "component-backdrop--offset" },
+          { title: "Overlap Backdrop", value: "component-backdrop--overlap" },
+          {
+            title: "Offset Mid Left Backdrop",
+            value: "component-backdrop__offset--mid-left",
+          },
+        ],
+      },
+    }),
+    defineField({
+      name: "scriptTitle",
+      title: "Script Title",
       description: "Handwritten subtitle",
       type: "string",
     }),
@@ -39,27 +56,15 @@ export const contentDbiPersonalizedStyle = defineType({
       type: "string",
     }),
     defineField({
-      name: "scriptCopy",
-      title: "Script Copy",
-      description: "Copy Hand Writting",
-      type: "string",
-    }),
-    defineField({
-      name: "scriptCopyAuthor",
-      title: "Script Copy Author",
-      description: "For giving author's name",
-      type: "string",
-    }),
-    defineField({
       name: "imageDesktop",
       title: "Desktop Image",
-      description: "Desktop Image",
+      description: "Give Desktop Image",
       type: "image",
     }),
     defineField({
       name: "imageMobile",
       title: "Mobile Image",
-      description: "Mobile Image",
+      description: "Give Mobile Image",
       type: "image",
     }),
     defineField({
@@ -69,14 +74,14 @@ export const contentDbiPersonalizedStyle = defineType({
       type: "string",
     }),
     defineField({
-      name: "imageCtaCategoryPath",
+      name: "ctaCategoryPath1",
       title: "PLP Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifcategoryfield". Falling back to string.',
       type: "string",
     }),
     defineField({
-      name: "imageCtaProductPath",
+      name: "ctaProductPath1",
       title: "Product Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifproductfield". Falling back to string.',
@@ -86,7 +91,7 @@ export const contentDbiPersonalizedStyle = defineType({
       name: "imageCtaLink",
       title: "Image Cta Link",
       description: "Image Cta Link",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "altText",
@@ -102,14 +107,14 @@ export const contentDbiPersonalizedStyle = defineType({
     }),
     defineField({
       name: "secondImageDesktop",
-      title: "Second Desktop Image Desktop",
-      description: "Second  Desktop Image",
+      title: "Desktop Image",
+      description: "Give Desktop Image",
       type: "image",
     }),
     defineField({
       name: "secondImageMobile",
-      title: "Second Mobile Image",
-      description: "Second Mobile Image  ",
+      title: "Mobile Image",
+      description: "Give Mobile Image",
       type: "image",
     }),
     defineField({
@@ -119,14 +124,14 @@ export const contentDbiPersonalizedStyle = defineType({
       type: "string",
     }),
     defineField({
-      name: "secondImageCtaCategoryPath",
+      name: "ctaCategoryPath2",
       title: "PLP Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifcategoryfield". Falling back to string.',
       type: "string",
     }),
     defineField({
-      name: "secondImageCtaProductPath",
+      name: "ctaProductPath2",
       title: "Product Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifproductfield". Falling back to string.',
@@ -136,7 +141,7 @@ export const contentDbiPersonalizedStyle = defineType({
       name: "secondImageCtaLink",
       title: "Second Image Cta Link",
       description: "Image Cta Link",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "secondAltText",
@@ -152,14 +157,14 @@ export const contentDbiPersonalizedStyle = defineType({
     }),
     defineField({
       name: "thirdImageDesktop",
-      title: "Third Desktop Image",
-      description: "Third Desktop Image",
+      title: "Desktop Image",
+      description: "Give Desktop Image",
       type: "image",
     }),
     defineField({
       name: "thirdImageMobile",
-      title: "Third Mobile Image",
-      description: "Third Mobile Image",
+      title: "Mobile Image",
+      description: "Give Mobile Image",
       type: "image",
     }),
     defineField({
@@ -169,14 +174,14 @@ export const contentDbiPersonalizedStyle = defineType({
       type: "string",
     }),
     defineField({
-      name: "thirdImageCtaCategoryPath",
+      name: "ctaCategoryPath3",
       title: "PLP Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifcategoryfield". Falling back to string.',
       type: "string",
     }),
     defineField({
-      name: "thirdImageCtaProductPath",
+      name: "ctaProductPath3",
       title: "Product Path",
       description:
         'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifproductfield". Falling back to string.',
@@ -186,7 +191,7 @@ export const contentDbiPersonalizedStyle = defineType({
       name: "thirdImageCtaLink",
       title: "Third Image Cta Link",
       description: "Image Cta Link",
-      type: "image",
+      type: "string",
     }),
     defineField({
       name: "thirdAltText",
@@ -201,79 +206,30 @@ export const contentDbiPersonalizedStyle = defineType({
       type: "string",
     }),
     defineField({
-      name: "fourthImageDesktop",
-      title: "Fourth Desktop Image",
-      description: "Fourth Desktop Image",
-      type: "image",
-    }),
-    defineField({
-      name: "fourthImageMobile",
-      title: "Fourth Mobile Image",
-      description: "Fourth Mobile Image",
-      type: "image",
-    }),
-    defineField({
-      name: "fourthImageCtaText",
-      title: "Fourth Image Cta Text",
-      description: "Image Cta Text",
-      type: "string",
-    }),
-    defineField({
-      name: "fourthImageCtaCategoryPath",
-      title: "PLP Path",
-      description:
-        'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifcategoryfield". Falling back to string.',
-      type: "string",
-    }),
-    defineField({
-      name: "fourthImageCtaProductPath",
-      title: "Product Path",
-      description:
-        'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifproductfield". Falling back to string.',
-      type: "string",
-    }),
-    defineField({
-      name: "fourthImageCtaLink",
-      title: "Fourth Image Cta Link",
-      description: "Image Cta Link",
-      type: "image",
-    }),
-    defineField({
-      name: "fourthTitleTag",
-      title: "Fourth Title Tag",
-      description: "Fourth Title Tag",
-      type: "string",
-    }),
-    defineField({
-      name: "fourthAltText",
-      title: "Fourth Alt Text",
-      description: "Fourth Alt Text",
-      type: "string",
-    }),
-    defineField({
       name: "bottomCtaText",
       title: "Bottom Cta Text",
       description: "Text for the Link at the Bottom",
       type: "text",
     }),
     defineField({
+      name: "ctaCategoryPath4",
+      title: "PLP Path",
+      description:
+        'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifcategoryfield". Falling back to string.',
+      type: "string",
+    }),
+    defineField({
+      name: "ctaProductPath4",
+      title: "Product Path",
+      description:
+        'TODO: no Sanity mapping for AEM resource type "/libs/commerce/gui/components/common/cifproductfield". Falling back to string.',
+      type: "string",
+    }),
+    defineField({
       name: "bottomCtaLink",
       title: "Bottom Cta Link",
       description: "Link at the Bottom",
       type: "string",
-    }),
-    defineField({
-      name: "backdropSelection",
-      title: "Backdrop",
-      type: "string",
-      options: {
-        list: [
-          { title: "Full Backdrop", value: "component-backdrop--full" },
-          { title: "Half Backdrop", value: "component-backdrop--half" },
-          { title: "Offset Backdrop", value: "component-backdrop--offset" },
-          { title: "Overlap Backdrop", value: "component-backdrop--overlap" },
-        ],
-      },
     }),
   ],
 });

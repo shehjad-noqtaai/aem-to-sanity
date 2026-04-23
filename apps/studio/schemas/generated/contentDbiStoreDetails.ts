@@ -16,8 +16,14 @@ export const contentDbiStoreDetails = defineType({
     { name: "storeStylists", title: "Store Stylists" },
   ],
   preview: {
-    prepare() {
-      return { title: "Store Details" };
+    select: {
+      prMedia: "aboutUsImage",
+    },
+    prepare({ prMedia }) {
+      return {
+        title: "Store Details",
+        media: prMedia,
+      };
     },
   },
   fields: [
@@ -33,7 +39,7 @@ export const contentDbiStoreDetails = defineType({
       name: "aboutUsImage",
       title: "About Us Image",
       description: "Path of the about us image",
-      type: "string",
+      type: "image",
       group: "mainInfo",
       validation: (Rule) => Rule.required(),
     }),
@@ -68,7 +74,7 @@ export const contentDbiStoreDetails = defineType({
               name: "designerImage",
               title: "Designers Image",
               description: "Path of the designer image",
-              type: "string",
+              type: "image",
               validation: (Rule) => Rule.required(),
             }),
             defineField({
@@ -97,7 +103,7 @@ export const contentDbiStoreDetails = defineType({
               name: "serviceIcon",
               title: "Service Icon",
               description: "Path of the service icon",
-              type: "string",
+              type: "image",
               validation: (Rule) => Rule.required(),
             }),
             defineField({
@@ -133,7 +139,7 @@ export const contentDbiStoreDetails = defineType({
               name: "sizeImage",
               title: "Size Image",
               description: "Path of the size image",
-              type: "string",
+              type: "image",
               validation: (Rule) => Rule.required(),
             }),
             defineField({
@@ -162,7 +168,7 @@ export const contentDbiStoreDetails = defineType({
               name: "stylistImage",
               title: "Stylist Image",
               description: "Path of the service icon",
-              type: "string",
+              type: "image",
               validation: (Rule) => Rule.required(),
             }),
             defineField({

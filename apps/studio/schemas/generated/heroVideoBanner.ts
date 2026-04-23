@@ -226,13 +226,13 @@ export const heroVideoBanner = defineType({
               title: "Video thumbnail",
               description:
                 'Video thumbnail rendition. Select particular video thumbnail among auto-generated under "renditions" subfolder of the video asset, or separate image asset to be used as thumbnail.',
-              type: "string",
+              type: "image",
             }),
             defineField({
               name: "transcript",
               title: "Video transcript file path",
               description: "Path to video transcript .vvt file.",
-              type: "string",
+              type: "image",
             }),
             defineField({
               name: "imageLink",

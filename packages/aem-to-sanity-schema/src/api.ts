@@ -62,6 +62,14 @@ export interface MigrateSchemasOptions {
   /** JCR prefix to strip from component paths when deriving `sling:resourceType`. Default: `/apps/`. */
   jcrPrefix?: string;
   /**
+   * Where the generated schema .ts files (component schemas + page.ts +
+   * pageBuilder.ts + index.ts barrel) are written. Defaults to
+   * `{outputDir}/schemas`. Set this when the consumer (e.g. a Sanity Studio
+   * app) wants the schemas under its own tree — keeps schema emission
+   * decoupled from `outputDir`, which holds only regenerable cache state.
+   */
+  schemasDir?: string;
+  /**
    * Treat per-component 401/403 failures as skips (logged + reported) rather
    * than aborting the whole batch. Matches the "unknown shapes are audit
    * findings, not failures" invariant for components that exist in AEM but
@@ -110,6 +118,7 @@ export async function migrateSchemas(
   const concurrency = opts.concurrency ?? 4;
   const continueOnAuth = opts.continueOnAuth ?? false;
   const authCircuitBreakerThreshold = opts.authCircuitBreakerThreshold ?? 5;
+  const schemasDir = opts.schemasDir ?? join(outputDir, "schemas");
 
   const report = new Report();
 
@@ -122,6 +131,7 @@ export async function migrateSchemas(
       processOne(p, {
         fetcher,
         outputDir,
+        schemasDir,
         report,
         logger,
         writeAemSnapshot,
@@ -159,7 +169,7 @@ export async function migrateSchemas(
   let pageFile: string | undefined;
   if (emitPageBuilder) {
     const pb = await writePageBuilderArtifacts({
-      outputDir,
+      schemasDir,
       componentTypeNames: successTypeNames,
       exclude: pageBuilderExclude,
       logger,
@@ -168,14 +178,14 @@ export async function migrateSchemas(
     pageFile = pb.pageFile;
   }
 
-  await pruneGeneratedSchemaFiles(outputDir, successTypeNames, { emitPageBuilder, logger });
+  await pruneGeneratedSchemaFiles(schemasDir, successTypeNames, { emitPageBuilder, logger });
 
   if (emitPageBuilder) {
     // Prefer filenames on disk so `index.ts` never imports a missing `.ts`
     // (e.g. if a write races or a stale checkout diverges from the report).
-    await rewriteBarrelFromDisk(outputDir);
+    await rewriteBarrelFromDisk(schemasDir);
   } else {
-    await writeSchemasBarrel(outputDir, report, { emitPageBuilder: false });
+    await writeSchemasBarrel(schemasDir, report, { emitPageBuilder: false });
   }
 
   if (docsOutputFile) {
@@ -219,6 +229,7 @@ export async function migrateSchemas(
 interface ProcessOneDeps {
   fetcher: NodeFetcher;
   outputDir: string;
+  schemasDir: string;
   report: Report;
   logger?: Logger;
   writeAemSnapshot: boolean;
@@ -246,7 +257,7 @@ async function processOne(
   componentPath: string,
   deps: ProcessOneDeps,
 ): Promise<{ authFailure: boolean; success: boolean }> {
-  const { fetcher, outputDir, report, writeAemSnapshot, regenerateCommand } =
+  const { fetcher, outputDir, schemasDir, report, writeAemSnapshot, regenerateCommand } =
     deps;
   const typeName = componentPathToTypeName(componentPath);
 
@@ -321,7 +332,7 @@ async function processOne(
     return { authFailure: false, success: false };
   }
 
-  const outputFile = join(outputDir, "schemas", `${typeName}.ts`);
+  const outputFile = join(schemasDir, `${typeName}.ts`);
   try {
     await writeTextFile(outputFile, contents);
   } catch (err) {
@@ -347,11 +358,10 @@ async function processOne(
 }
 
 async function pruneGeneratedSchemaFiles(
-  outputDir: string,
+  schemasDir: string,
   componentTypeNames: string[],
   opts: { emitPageBuilder: boolean; logger?: Logger },
 ): Promise<void> {
-  const schemasDir = join(outputDir, "schemas");
   let entries: string[];
   try {
     entries = await readdir(schemasDir);
@@ -397,7 +407,7 @@ async function pruneGeneratedSchemaFiles(
  * schemas on disk.
  */
 async function writeSchemasBarrel(
-  outputDir: string,
+  schemasDir: string,
   report: Report,
   opts: { emitPageBuilder: boolean },
 ): Promise<void> {
@@ -422,7 +432,7 @@ export const allSchemaTypes = [${list}];
 ${allNames.map((n) => `export { ${n} };`).join("\n")}
 `;
 
-  const file = join(outputDir, "schemas", "index.ts");
+  const file = join(schemasDir, "index.ts");
   await writeTextFile(file, src);
 }
 

@@ -24,6 +24,14 @@ async function main(): Promise<void> {
     process.argv.includes("--continue-on-auth") ||
     process.env.AEM_CONTINUE_ON_AUTH === "true";
 
+  // Schemas are emitted under SCHEMAS_OUT_DIR when set, otherwise the legacy
+  // `{outputDir}/schemas` path. Lets consumers (e.g. apps/studio) own the
+  // generated schemas directly while `{outputDir}/cache/` still holds
+  // regenerable artifacts.
+  const schemasDir = process.env.SCHEMAS_OUT_DIR
+    ? resolve(process.env.SCHEMAS_OUT_DIR)
+    : undefined;
+
   const componentPaths = await readComponentPaths(config.componentPathsFile);
   const exceptionsFile = resolve(
     process.env.AEM_COMPONENT_EXCEPTIONS_FILE ?? "./aem-component-exceptions",
@@ -67,6 +75,7 @@ async function main(): Promise<void> {
     componentPaths: filtered,
     fetcher,
     outputDir: config.outputDir,
+    schemasDir,
     concurrency: config.concurrency,
     logger,
     docsOutputFile: "./docs/aem-to-sanity-mapping.md",

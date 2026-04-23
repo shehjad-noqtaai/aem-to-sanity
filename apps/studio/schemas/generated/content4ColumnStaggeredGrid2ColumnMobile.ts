@@ -9,14 +9,8 @@ export const content4ColumnStaggeredGrid2ColumnMobile = defineType({
   title: "4 Column Staggered Grid 2 Column Mobile",
   type: "object",
   preview: {
-    select: {
-      prMedia: "styleimage.0.styleimagemobile",
-    },
-    prepare({ prMedia }) {
-      return {
-        title: "4 Column Staggered Grid 2 Column Mobile",
-        media: prMedia,
-      };
+    prepare() {
+      return { title: "4 Column Staggered Grid 2 Column Mobile" };
     },
   },
   fields: [
@@ -68,12 +62,12 @@ export const content4ColumnStaggeredGrid2ColumnMobile = defineType({
             defineField({
               name: "styleimagemobile",
               title: "Mobile Image",
-              type: "image",
+              type: "string",
             }),
             defineField({
               name: "styleimagedesktop",
               title: "desktop Image",
-              type: "image",
+              type: "string",
             }),
             defineField({
               name: "imageAltText",
