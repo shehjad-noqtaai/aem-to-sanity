@@ -66,8 +66,22 @@ function encodeFilename(jcrPath: string): string {
   return jcrPath.replace(/^\/+/, "").replace(/[^A-Za-z0-9_-]/g, "_") + ".json";
 }
 
-function categorize(message: string): "notFound" | "ambiguous" | "auth" | "tooLarge" | "other" {
-  const m = message.toLowerCase();
+type FailureCategory = "notFound" | "ambiguous" | "auth" | "tooLarge" | "other";
+
+function categorize(err: unknown): FailureCategory {
+  // Prefer structured fields when we have them — message text is a fragile
+  // signal. AemFetchError("auth") comes with details.status=401|403 and a
+  // message like "Authentication failed (401) for ..." which the old
+  // string-sniffing regex (`http 401`) missed entirely.
+  if (err instanceof AemFetchError) {
+    if (err.kind === "auth") return "auth";
+    if (err.kind === "tooLarge") return "tooLarge";
+    const status = err.details?.status;
+    if (status === 404) return "notFound";
+    if (status === 300) return "ambiguous";
+    if (status === 401 || status === 403) return "auth";
+  }
+  const m = (err instanceof Error ? err.message : String(err)).toLowerCase();
   if (m.includes("http 404")) return "notFound";
   if (m.includes("http 300")) return "ambiguous";
   if (m.includes("http 401") || m.includes("http 403")) return "auth";
@@ -95,7 +109,7 @@ async function main(): Promise<void> {
   console.error(`[extract] ${entries.length} root(s) from ${config.baseUrl} → ${rawDir}`);
 
   const ambiguous: Array<{ rootPath: string; resolution: AmbiguousResolution }> = [];
-  const failures: Array<{ rootPath: string; message: string; category: ReturnType<typeof categorize> }> = [];
+  const failures: Array<{ rootPath: string; message: string; category: FailureCategory }> = [];
   const depthExpansions: Array<{
     rootPath: string;
     markersFound: number;
@@ -149,7 +163,7 @@ async function main(): Promise<void> {
       downloaded++;
     } catch (err) {
       const message = err instanceof AemFetchError ? err.message : (err as Error).message;
-      failures.push({ rootPath: entry.jcrPath, message, category: categorize(message) });
+      failures.push({ rootPath: entry.jcrPath, message, category: categorize(err) });
     }
   }
 
