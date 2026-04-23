@@ -34,7 +34,7 @@ export interface MigrateSchemasOptions {
   outputDir: string;
   concurrency?: number;
   logger?: Logger;
-  /** Persist each component's raw dialog JSON to `{outputDir}/aem/components/`. Defaults to true. */
+  /** Persist each component's raw dialog JSON to `{outputDir}/cache/aem/components/`. Defaults to true. */
   writeAemSnapshot?: boolean;
   /** Run the unmapped-type audit after the main pass. Defaults to true. */
   runAudit?: boolean;
@@ -57,7 +57,7 @@ export interface MigrateSchemasOptions {
    * absence of the `__generated` marker).
    */
   emitContentRegistry?: boolean;
-  /** Path for the generated registry. Default: `{outputDir}/content-type-registry.json`. */
+  /** Path for the generated registry. Default: `{outputDir}/cache/content-type-registry.json`. */
   contentRegistryFile?: string;
   /** JCR prefix to strip from component paths when deriving `sling:resourceType`. Default: `/apps/`. */
   jcrPrefix?: string;
@@ -149,7 +149,7 @@ export async function migrateSchemas(
     },
   );
 
-  const reportFile = join(outputDir, "migration-report.json");
+  const reportFile = join(outputDir, "cache", "migration-report.json");
   await report.write(reportFile);
   const successTypeNames = report.results
     .filter((r): r is Extract<typeof r, { status: "success" }> => r.status === "success")
@@ -196,7 +196,7 @@ export async function migrateSchemas(
 
   let registryFile: string | undefined;
   if (emitContentRegistry) {
-    const file = contentRegistryFile ?? join(outputDir, "content-type-registry.json");
+    const file = contentRegistryFile ?? join(outputDir, "cache", "content-type-registry.json");
     const r = await writeContentRegistry({
       outputFile: file,
       report,
@@ -433,7 +433,7 @@ async function saveDialogJson(
   logger?: Logger,
 ): Promise<void> {
   const rel = componentPath.replace(/^\/+/, "");
-  const file = join(outputDir, "aem", "components", `${rel}.json`);
+  const file = join(outputDir, "cache", "aem", "components", `${rel}.json`);
   try {
     await writeJson(file, dialog, { pretty: true });
   } catch (err) {

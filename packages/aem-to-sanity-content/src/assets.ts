@@ -420,8 +420,8 @@ async function main(): Promise<void> {
   const c = createColors({ stream: process.stderr });
   const config = resolveConfig(process.env);
   const outputDir = resolve(process.env.OUTPUT_DIR ?? "./output");
-  const cleanDir = join(outputDir, "clean");
-  const assetsDir = join(outputDir, "assets");
+  const cleanDir = join(outputDir, "cache", "clean");
+  const assetsDir = join(outputDir, "cache", "assets");
   const manifestFile = join(assetsDir, "manifest.json");
   const dryRun = process.env.MIGRATION_DRY_RUN !== "false";
   const uploadOnly = process.argv.includes("--upload-only");
@@ -562,7 +562,7 @@ async function main(): Promise<void> {
   };
   const unresolvedList = [...rewriteStats.unresolved].sort();
   writeFileSync(
-    join(outputDir, "assets-report.json"),
+    join(outputDir, "cache", "assets-report.json"),
     JSON.stringify(
       {
         generatedAt: new Date().toISOString(),

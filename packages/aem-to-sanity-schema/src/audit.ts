@@ -79,7 +79,7 @@ export async function auditUnmappedTypes(
     }
   }
 
-  const examplesPath = join(outputDir, "audit", "unmapped-examples.json");
+  const examplesPath = join(outputDir, "cache", "audit", "unmapped-examples.json");
   await writeJson(examplesPath, examples);
   const count = Object.keys(examples).length;
   logger?.info(

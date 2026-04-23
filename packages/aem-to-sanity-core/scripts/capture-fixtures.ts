@@ -14,7 +14,7 @@
  *
  * Reads the same env vars as `aem-extract` (`AEM_AUTHOR_URL`,
  * `AEM_AUTHOR_USERNAME`, `AEM_AUTHOR_PASSWORD`, or `AEM_TOKEN`). Writes under
- * `examples/davids-bridal/fixtures/aem/` by default, overridable via
+ * `examples/davids-bridal/output/cache/fixtures/aem/` by default, overridable via
  * `FIXTURES_OUT_DIR`.
  *
  * For each target: performs the fetch, writes the JSON body as a file with a
@@ -112,7 +112,7 @@ async function main(): Promise<void> {
   const repoRoot = resolve(here, "../../..");
   const outDir = resolve(
     process.env.FIXTURES_OUT_DIR ??
-      join(repoRoot, "examples/davids-bridal/fixtures/aem"),
+      join(repoRoot, "examples/davids-bridal/output/cache/fixtures/aem"),
   );
   mkdirSync(outDir, { recursive: true });
 

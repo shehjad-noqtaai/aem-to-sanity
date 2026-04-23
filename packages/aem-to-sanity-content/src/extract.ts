@@ -103,7 +103,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const rawDir = join(outputDir, "raw");
+  const rawDir = join(outputDir, "cache", "raw");
   mkdirSync(rawDir, { recursive: true });
 
   console.error(`[extract] ${entries.length} root(s) from ${config.baseUrl} → ${rawDir}`);
@@ -194,12 +194,12 @@ async function main(): Promise<void> {
     depthExpansions,
     failures,
   };
-  const reportFile = join(outputDir, "extract-report.json");
+  const reportFile = join(outputDir, "cache", "extract-report.json");
   mkdirSync(dirname(reportFile), { recursive: true });
   writeFileSync(reportFile, JSON.stringify(report, null, 2) + "\n", "utf8");
 
   const notFound = failures.filter((f) => f.category === "notFound");
-  const notFoundLog = join(outputDir, "extract-404.log");
+  const notFoundLog = join(outputDir, "cache", "extract-404.log");
   if (notFound.length > 0) {
     const lines = notFound.map((f) => `${f.rootPath}\t${config.baseUrl}${f.rootPath}.infinity.json`);
     writeFileSync(notFoundLog, lines.join("\n") + "\n", "utf8");
