@@ -16,6 +16,14 @@ async function main(): Promise<void> {
   const config = resolveConfig(process.env);
   const logger = createLogger({ level: "info" });
 
+  // Accept both the CLI flag and the env var. When true, per-component 401/403
+  // failures are recorded as skips and the batch keeps going; the api-level
+  // circuit breaker still bails if no component has succeeded after N auth
+  // failures (signals credentials-wide failure, not per-path ACL).
+  const continueOnAuth =
+    process.argv.includes("--continue-on-auth") ||
+    process.env.AEM_CONTINUE_ON_AUTH === "true";
+
   const componentPaths = await readComponentPaths(config.componentPathsFile);
   const exceptionsFile = resolve(
     process.env.AEM_COMPONENT_EXCEPTIONS_FILE ?? "./aem-component-exceptions",
@@ -62,6 +70,7 @@ async function main(): Promise<void> {
     concurrency: config.concurrency,
     logger,
     docsOutputFile: "./docs/aem-to-sanity-mapping.md",
+    continueOnAuth,
   });
 
   const s = report.summary();
@@ -91,25 +100,32 @@ async function main(): Promise<void> {
       failures.reduce((w, f) => Math.max(w, f.path.length), 0),
     );
     const hasAuthFailure = failures.some((f) => f.kind === "auth");
-    const headline = hasAuthFailure
-      ? `${failures.length} component(s) failed (auth — aborting):`
-      : s.successes === 0
-        ? `${failures.length} component(s) failed (no successes — aborting):`
+    // With continueOnAuth, per-component auth failures are ACL skips as long
+    // as at least one component succeeded. A full wipeout (0 successes) still
+    // means credentials were wrong → hard abort.
+    const treatAsFatal =
+      (hasAuthFailure && !continueOnAuth) || s.successes === 0;
+    const headline = treatAsFatal
+      ? hasAuthFailure
+        ? `${failures.length} component(s) failed (auth — aborting):`
+        : `${failures.length} component(s) failed (no successes — aborting):`
+      : hasAuthFailure
+        ? `${failures.length} component(s) skipped (${failures.filter((f) => f.kind === "auth").length} auth / ${failures.length - failures.filter((f) => f.kind === "auth").length} other):`
         : `${failures.length} component(s) skipped with errors:`;
-    const level = hasAuthFailure || s.successes === 0 ? logger.error : logger.warn;
+    const level = treatAsFatal ? logger.error : logger.warn;
 
     level(headline);
     failures.forEach((f, i) => {
       const n = c.dim(String(i + 1).padStart(2, " ") + ".");
       const path = f.path.padEnd(pathWidth, " ");
-      const kindPainted = hasAuthFailure || s.successes === 0 ? c.red : c.yellow;
+      const kindPainted = treatAsFatal ? c.red : c.yellow;
       const kind = kindPainted(`[${f.kind}]`.padEnd(14, " "));
       const msg = c.dim(f.message.replace(/\s+/g, " ").slice(0, 140));
       level(`  ${n} ${path}  ${kind} ${msg}`);
     });
     level(`Full details in ${c.dim(reportFile)} under results[].`);
 
-    if (hasAuthFailure || s.successes === 0) process.exit(1);
+    if (treatAsFatal) process.exit(1);
     logger.info(
       "Partial-success run. Drop failed paths from the component-paths file (or fix them in AEM) to clean this up.",
     );

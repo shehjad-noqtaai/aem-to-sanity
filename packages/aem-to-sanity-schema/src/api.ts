@@ -61,6 +61,23 @@ export interface MigrateSchemasOptions {
   contentRegistryFile?: string;
   /** JCR prefix to strip from component paths when deriving `sling:resourceType`. Default: `/apps/`. */
   jcrPrefix?: string;
+  /**
+   * Treat per-component 401/403 failures as skips (logged + reported) rather
+   * than aborting the whole batch. Matches the "unknown shapes are audit
+   * findings, not failures" invariant for components that exist in AEM but
+   * whose dialog is ACL-denied to the caller.
+   *
+   * Circuit breaker: if no component succeeds within the first
+   * `authCircuitBreakerThreshold` auth failures (default 5), the batch still
+   * aborts — that pattern signals credentials-wide failure (wrong password,
+   * expired token) rather than per-path ACL denial, and continuing just
+   * hammers AEM toward an account lockout.
+   *
+   * Default: false (existing behaviour — any auth failure aborts).
+   */
+  continueOnAuth?: boolean;
+  /** Threshold for the `continueOnAuth` circuit breaker. Default: 5. */
+  authCircuitBreakerThreshold?: number;
 }
 
 export interface MigrateSchemasResult {
@@ -91,8 +108,13 @@ export async function migrateSchemas(
     jcrPrefix,
   } = opts;
   const concurrency = opts.concurrency ?? 4;
+  const continueOnAuth = opts.continueOnAuth ?? false;
+  const authCircuitBreakerThreshold = opts.authCircuitBreakerThreshold ?? 5;
 
   const report = new Report();
+
+  let authFailures = 0;
+  let successes = 0;
 
   await runWithConcurrency(
     componentPaths,
@@ -106,7 +128,25 @@ export async function migrateSchemas(
         regenerateCommand,
       }),
     concurrency,
-    (r) => ({ shouldAbort: r.authFailure }),
+    (r) => {
+      if (r.success) successes++;
+      if (r.authFailure) authFailures++;
+      if (!continueOnAuth) return { shouldAbort: r.authFailure };
+      // continueOnAuth: only abort if we've seen N auth failures in a row with
+      // zero successes — signals credentials-wide failure, not per-path ACL.
+      if (successes === 0 && authFailures >= authCircuitBreakerThreshold) {
+        logger?.error(
+          `continueOnAuth: ${authFailures} consecutive auth failures with 0 successes — circuit breaker tripped, aborting to avoid account lockout.`,
+        );
+        return { shouldAbort: true };
+      }
+      if (r.authFailure) {
+        logger?.warn(
+          `Auth failure on a component — treating as per-path ACL denial and continuing (continueOnAuth=true).`,
+        );
+      }
+      return { shouldAbort: false };
+    },
   );
 
   const reportFile = join(outputDir, "migration-report.json");
@@ -205,7 +245,7 @@ function embeddedCqDialog(node: DialogNode): DialogNode | undefined {
 async function processOne(
   componentPath: string,
   deps: ProcessOneDeps,
-): Promise<{ authFailure: boolean }> {
+): Promise<{ authFailure: boolean; success: boolean }> {
   const { fetcher, outputDir, report, writeAemSnapshot, regenerateCommand } =
     deps;
   const typeName = componentPathToTypeName(componentPath);
@@ -233,7 +273,7 @@ async function processOne(
         message: err.message,
         bodyExcerpt: err.details?.bodyExcerpt,
       });
-      return { authFailure: err.kind === "auth" };
+      return { authFailure: err.kind === "auth", success: false };
     }
     report.add({
       status: "failure",
@@ -241,7 +281,7 @@ async function processOne(
       kind: "network",
       message: (err as Error).message,
     });
-    return { authFailure: false };
+    return { authFailure: false, success: false };
   }
 
   if (writeAemSnapshot) {
@@ -258,7 +298,7 @@ async function processOne(
       kind: "mappingError",
       message: (err as Error).message,
     });
-    return { authFailure: false };
+    return { authFailure: false, success: false };
   }
 
   let contents: string;
@@ -278,7 +318,7 @@ async function processOne(
       kind: "mappingError",
       message: `emitter failed: ${(err as Error).message}`,
     });
-    return { authFailure: false };
+    return { authFailure: false, success: false };
   }
 
   const outputFile = join(outputDir, "schemas", `${typeName}.ts`);
@@ -291,7 +331,7 @@ async function processOne(
       kind: "writeError",
       message: (err as Error).message,
     });
-    return { authFailure: false };
+    return { authFailure: false, success: false };
   }
 
   report.add({
@@ -303,7 +343,7 @@ async function processOne(
     unmapped: mapped.unmapped,
     renamed: mapped.renamed,
   });
-  return { authFailure: false };
+  return { authFailure: false, success: true };
 }
 
 async function pruneGeneratedSchemaFiles(
