@@ -406,6 +406,22 @@ function rewriteDamRefs(
   }
   const obj = value as Record<string, unknown>;
   for (const key of Object.keys(obj)) obj[key] = rewriteDamRefs(obj[key], manifest, stats, key) as unknown;
+  // Transform parks DAM paths at `{base}AemPath` and clears `{base}` so the
+  // asset field stays empty until we fill it here (see transform.ts `splitAemFileUploadDamPaths`).
+  for (const key of Object.keys(obj)) {
+    if (!key.endsWith("AemPath")) continue;
+    const base = key.slice(0, -"AemPath".length);
+    if (!base || obj[base] !== undefined) continue;
+    const provenance = obj[key];
+    if (typeof provenance !== "string" || !provenance.startsWith("/content/dam/")) continue;
+    const hit = manifest[provenance];
+    if (hit?.sanityRef) {
+      obj[base] = hit.sanityRef;
+      stats.rewrites++;
+    } else {
+      stats.unresolved.add(provenance);
+    }
+  }
   return obj;
 }
 
