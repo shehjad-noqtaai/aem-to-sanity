@@ -11,6 +11,6 @@ const dataset =
 export default defineCliConfig({
   api: { projectId, dataset },
   deployment: {
-    appId: "y07jj5o21nfuxc1pu93tq2dm",
-  },
+    appId: 'j4j4yy6ymbsjwjrkcu3w81ik',
+  }
 });
